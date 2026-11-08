@@ -54,7 +54,8 @@ from services.demo.metrics import (
 )
 
 MODEL_ID = "amazon.nova-2-sonic-v1:0"
-VOICE_ID = "matthew"
+# Nova 2 Sonic en-US voices: tiffany (default here) or matthew; en-IN: kiara, arjun.
+VOICE_ID = os.environ.get("DEMO_VOICE", "tiffany")
 AWS_REGION = os.environ.get("DEMO_AWS_REGION", "us-east-1")
 MAX_CONCURRENT = 3
 MAX_SESSION_SECONDS = float(os.environ.get("DEMO_MAX_SESSION_SECONDS", "300"))
@@ -74,7 +75,12 @@ What would you like to know?"
 Conversation style: answer the question first, with a concrete detail from the facts below. \
 Never repeat the same offer twice; after most answers just stop. Only every second or third \
 turn suggest ONE specific follow-up, phrased differently each time (for example how \
-barge-in works, why some numbers are pending, or what the live demo runs on).
+interruptions work, why some numbers are pending, or what the live demo runs on).
+Pronunciation: you are heard, not read. Prefer plain spoken words over jargon. Say \
+"interrupting" instead of barge-in, "speech to text" and "text to speech" instead of STT or \
+TTS, "Amazon" or "A W S" letter by letter, "L L M" letter by letter, "Postgres" as post-gress, \
+"Pipecat" as pipe-cat. Say numbers as words, like "fifty of two hundred". Avoid symbols, \
+slashes and version strings.
 Speech recognition mishears words. When a word seems off-topic but sounds like something \
 about this project (dogs for docs, gates for GATES, pipe cat for Pipecat), assume the \
 project meaning, or briefly ask which they meant. If a caller asks two things, answer both.
@@ -101,15 +107,15 @@ quality claim is built to be reproducible with a printed command.
 Use cases: phone and web voice agents for public services, appointment booking, healthcare \
 intake, customer support, or any telephony or voice-assistant workload. The German \
 municipal phone hotline is the worked example: 24/7, 30+ languages, EU-hosted.
-How it works: WebRTC or SIP/RTP audio enters a Pipecat real-time runtime with one worker \
-per call. Streaming speech-to-text feeds a typed call state, then a pydantic-ai agent with \
-tools, then streaming text-to-speech. Storage is PostgreSQL with pgvector, plus \
-S3-compatible originals. Providers are AWS Bedrock and OpenRouter, behind protocols so \
-they can be swapped without touching orchestration. Each call has one single-writer state \
-machine; barge-in bumps a generation counter so stale output is dropped. Calls beyond \
-capacity get a fast busy before any provider spend.
-This live demo: the browser connects over WebRTC to this agent, which runs AWS Bedrock \
-Nova 2 Sonic speech-to-speech on one AWS Fargate task. The task scales to zero when nobody \
+How it works: audio from a web browser or a phone line enters a real-time pipeline with \
+one worker per call. Speech to text feeds a typed call state, then an AI agent with tools, \
+then text to speech, all streaming. Knowledge lives in a Postgres database with vector \
+search. Model providers, Amazon Bedrock or OpenRouter, sit behind one interface so they can \
+be swapped without touching the rest. Each call has a single state machine; when the caller \
+interrupts, the agent stops at once and drops its unfinished reply. Extra calls get a quick \
+busy signal before any model cost is spent.
+This live demo: the browser connects straight to this agent, which runs Amazon Nova 2 \
+Sonic, a speech to speech model, on one small cloud server. The task scales to zero when nobody \
 calls, so the first call takes about a minute to wake it. Calls are capped at five minutes \
 and three at a time to bound cost.
 Measured: 58 backend tests pass, with strict Ruff and Pyright clean. A deterministic \
