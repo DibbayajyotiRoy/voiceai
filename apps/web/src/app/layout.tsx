@@ -15,9 +15,9 @@ const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
 });
 
-const title = "voiceai: a phone agent you can call";
+const title = "voiceai: talk to a voice agent";
 const description =
-  "A German municipal phone agent you can call right now. Every claim on the page is measured with its command, or marked pending.";
+  "Talk to an open voice-agent stack running live on AWS Bedrock Nova 2 Sonic. Tap the orb to call.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://voiceai-presentation.vercel.app"),
@@ -42,7 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${archivo.variable} ${jetbrains.variable} h-full antialiased`}
+      className={`${archivo.variable} ${jetbrains.variable} booth h-full antialiased`}
       suppressHydrationWarning
     >
       <head>

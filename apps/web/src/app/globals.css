@@ -43,11 +43,13 @@ html {
   background: var(--ground);
   scroll-behavior: smooth;
   scroll-padding-top: 5rem;
+  overflow-x: clip;
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
 body {
+  overflow-x: clip;
   background: var(--ground);
   color: var(--ink);
   font-family: var(--font-archivo), system-ui, sans-serif;
@@ -115,10 +117,6 @@ body {
 .key--solid { background: var(--ink); color: var(--ground); }
 .key .arrow { display: inline-block; transition: translate 0.45s var(--ease); }
 .key:hover .arrow, .key:focus-visible .arrow { translate: 5px 0; }
-
-/* Reveal: hidden only when JS + motion are allowed (html.motion is set in <head>). */
-html.motion [data-trace] { clip-path: inset(0 100% 0 0); transition: clip-path 1.1s var(--ease); }
-html.motion [data-trace].is-traced { clip-path: inset(0 0 0 -2%); }
 
 .skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--ink); color: var(--ground); padding: 0.6rem 1rem; }
 .skip:focus { left: 8px; }

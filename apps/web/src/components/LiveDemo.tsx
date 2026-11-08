@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { gsap } from "gsap";
-import { DemoReplay } from "@/components/DemoReplay";
-import { SignalLine } from "@/components/SignalLine";
+import { track } from "@vercel/analytics";
+import { Orb, type OrbPhase } from "@/components/Orb";
 import { signal } from "@/lib/signal";
 
-// Public base URL of the control API. Inlined at build time; unset = replay only.
+// Public base URL of the control API. Inlined at build time; unset = calls off.
 const CONTROL_URL = process.env.NEXT_PUBLIC_DEMO_CONTROL_URL?.replace(/\/+$/, "");
 const POLL_MS = 3000;
 const WAKE_TIMEOUT_MS = 150_000;
@@ -14,7 +14,7 @@ const ICE_WAIT_MS = 3000;
 const MAX_CALL_S = 300;
 
 type Backend = { state: "stopped" | "starting" | "ready"; url: string | null };
-type Phase = "idle" | "waking" | "connecting" | "live" | "error";
+type Phase = OrbPhase;
 
 /** One start-to-hangup attempt. Teardown is driven entirely from here. */
 type Session = {
@@ -79,34 +79,22 @@ function teardown(s: Session) {
 const fmt = (s: number) =>
   `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-// The call key is big on purpose. Inline: .key's own min-height would win over a utility class.
-const callKey = { minHeight: 64, padding: "0 2rem", fontSize: "1.125rem" };
-
-/** Live WebRTC voice demo backed by the scale-to-zero AWS agent, with the replay as fallback. */
+/** The orb: one click starts a WebRTC call with the scale-to-zero AWS agent, one click ends it. */
 export function LiveDemo() {
-  const rootRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const sessionRef = useRef<Session | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState("");
 
-  // Prewarm: wake the backend once, when the section first scrolls into view.
+  // Page load: count the visit, then wake the agent so it is often ready before the first click.
   useEffect(() => {
-    const el = rootRef.current;
-    if (!CONTROL_URL || !el) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((e) => e.isIntersecting)) return;
-        io.disconnect();
-        fetchBackend("start").catch(() => {
-          // Ignored: clicking Start retries and reports errors.
-        });
-      },
-      { threshold: 0.2 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
+    track("presentation_started");
+    if (CONTROL_URL) {
+      fetchBackend("start").catch(() => {
+        // Ignored: clicking the orb retries and reports errors.
+      });
+    }
   }, []);
 
   // Stop everything if the page unmounts mid-call.
@@ -121,7 +109,10 @@ export function LiveDemo() {
   const finish = (next: "idle" | "error", msg: string) => {
     const s = sessionRef.current;
     sessionRef.current = null;
-    if (s) teardown(s);
+    if (s) {
+      if (s.live) track("call_ended");
+      teardown(s);
+    }
     if (audioRef.current) audioRef.current.srcObject = null;
     setPhase(next);
     setMessage(msg);
@@ -179,7 +170,7 @@ export function LiveDemo() {
     if (s.cancelled) return;
     await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
 
-    // Live: reset the session timer and drive the signal line from mic and agent audio.
+    // Live: reset the session timer and drive the orb from mic and agent audio.
     s.live = true;
     s.t0 = Date.now();
     if (s.audioCtx) {
@@ -197,6 +188,7 @@ export function LiveDemo() {
     gsap.ticker.add(s.tick);
     setElapsed(0);
     setPhase("live");
+    track("call_started");
   };
 
   const startCall = async () => {
@@ -229,7 +221,7 @@ export function LiveDemo() {
       while (b.state !== "ready" || !b.url) {
         if (Date.now() - s.t0 > WAKE_TIMEOUT_MS) {
           throw new Error(
-            "The agent did not wake up in time. Try again later, or listen to the replay.",
+            "The agent did not wake up in time. Try again later.",
           );
         }
         await sleep(POLL_MS);
@@ -248,53 +240,48 @@ export function LiveDemo() {
   const hangUp = () => finish("idle", "Call ended. Thanks for listening.");
 
   const busy = phase === "waking" || phase === "connecting";
-  const statusText = !CONTROL_URL
-    ? "Live calls are off in this build. The scripted call below runs offline."
-    : phase === "idle"
-      ? message ||
-        "Talk to the agent live. It runs on AWS and scales to zero when unused to save cost, so the first start takes about a minute."
-      : phase === "waking"
-        ? `Waking the agent on AWS. This takes about a minute, because it scales to zero when unused. (${elapsed}s)`
-        : phase === "connecting"
-          ? "Agent is awake. Connecting audio…"
-          : phase === "live"
-            ? `Live. You are talking to the agent. ${fmt(elapsed)} of 05:00.`
-            : message;
+  const orbLabel = !CONTROL_URL
+    ? "Live calls are off"
+    : phase === "live"
+      ? "End call"
+      : busy
+        ? "Cancel"
+        : "Start call";
+  const onOrb = () => (busy || phase === "live" ? hangUp() : startCall());
+
+  // The clock ticks every second; it is aria-hidden so the live region does not chatter.
+  let status: ReactNode;
+  if (!CONTROL_URL) {
+    status = "Live calls are off in this build.";
+  } else if (phase === "idle") {
+    status = `${message ? `${message} ` : ""}Tap to call.`;
+  } else if (phase === "waking") {
+    status = (
+      <>
+        Waking the agent on AWS. First call takes up to two minutes; it sleeps when unused.{" "}
+        <span aria-hidden="true">({elapsed}s)</span>
+      </>
+    );
+  } else if (phase === "connecting") {
+    status = "Connecting audio…";
+  } else if (phase === "live") {
+    status = (
+      <>
+        Live <span aria-hidden="true">{fmt(elapsed)} / 05:00.</span> Tap the orb to hang up.
+      </>
+    );
+  } else {
+    status = `${message} Tap to try again.`;
+  }
 
   return (
-    <div ref={rootRef} className="space-y-10">
-      <div className="space-y-8">
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-5">
-          {CONTROL_URL && (phase === "idle" || phase === "error") && (
-            <button onClick={startCall} className="key key--solid" style={callKey}>
-              {phase === "error" ? "Try again" : "Call the agent"}
-            </button>
-          )}
-          {CONTROL_URL && busy && (
-            <button onClick={hangUp} className="key" style={callKey}>
-              Cancel
-            </button>
-          )}
-          {CONTROL_URL && phase === "live" && (
-            <button onClick={hangUp} className="key key--solid" style={callKey}>
-              End call
-            </button>
-          )}
-          <p role="status" aria-live="polite" className="mono max-w-[48ch] text-sm text-muted">
-            {statusText}
-          </p>
-        </div>
-        <SignalLine height={200} />
-        {phase === "error" && (
-          <p className="mono text-sm text-muted">The recorded call below works offline.</p>
-        )}
-        {/* Remote agent audio; autoplay is triggered from a user gesture. */}
-        <audio ref={audioRef} autoPlay />
-      </div>
-      <div className="space-y-6 border-t border-line pt-10">
-        <h3 className="text-[length:var(--t-m)] font-semibold">Or replay the scripted German call</h3>
-        <DemoReplay />
-      </div>
+    <div className="flex flex-col items-center gap-6">
+      <Orb phase={phase} enabled={!!CONTROL_URL} label={orbLabel} onClick={onOrb} />
+      <p role="status" aria-live="polite" className="mono min-h-[3rem] max-w-[52ch] text-center text-sm text-muted">
+        {status}
+      </p>
+      {/* Remote agent audio; autoplay is triggered from a user gesture. */}
+      <audio ref={audioRef} autoPlay />
     </div>
   );
 }

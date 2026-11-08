@@ -6,8 +6,8 @@
  *        (defaults to DEPLOYED_URL env var)
  *
  * Fetches the live page and checks, over plain HTTP:
- *  1. The page renders the key sections (server-rendered HTML, no JS needed).
- *  2. The honesty markers and demo-mode disclosure survive deployment.
+ *  1. The page renders the call control and headline (server-rendered HTML, no JS needed).
+ *  2. The demo-mode disclosure survives deployment.
  *  3. No PII forms or tracking beyond Vercel Analytics is embedded.
  *  4. Response headers/security basics are sane.
  *
@@ -40,11 +40,9 @@ try {
 const html = await res.text();
 
 ok(res.ok, `HTTP ${res.status} from ${target}`);
-ok(html.includes("German municipal voice AI"), "hero thesis rendered");
-ok(html.includes("Architecture") && html.includes("Speech layer"), "sections rendered");
-ok(html.includes("MEASURED") && html.includes("PENDING"), "honesty markers present");
+ok(html.includes("Talk to a voice agent."), "headline rendered");
+ok(/aria-label="[^"]*call/i.test(html), "call control (aria-label containing 'call') present");
 ok(html.includes("no S3, no PostgreSQL"), "demo-mode disclosure present");
-ok(html.includes("replay call"), "demo replay control present");
 
 const headers = res.headers;
 ok(
@@ -67,25 +65,23 @@ ok(
 );
 ok(!/sk-or-[a-zA-Z0-9]|AKIA[0-9A-Z]{16}/.test(html), "HTML free of embedded credentials");
 // Vercel Analytics / Speed Insights load as npm packages inlined into the JS
-// chunks at runtime; verify by fetching one chunk and looking for the marker.
+// chunks at runtime; fetch the chunks and look for the markers.
 const chunkMatches = [...html.matchAll(/src="(\/_next\/static\/[^"]+\.js)"/g)];
-let sawVercelInstrumentation = false;
+let js = "";
 for (const [, src] of chunkMatches.slice(0, 12)) {
   try {
-    const js = await fetch(new URL(src, target)).then((r) => r.text());
-    if (
-      js.includes("presentation_started") ||
-      js.includes("https://vitals.vercel") ||
-      js.includes("va.vercel")
-    ) {
-      sawVercelInstrumentation = true;
-      break;
-    }
+    js += await fetch(new URL(src, target)).then((r) => r.text());
   } catch {
     /* chunk fetch is best-effort */
   }
 }
-ok(sawVercelInstrumentation, "Vercel analytics/speed-insights instrumentation served");
+for (const event of ["presentation_started", "call_started", "call_ended", "contact_link_clicked"]) {
+  ok(js.includes(event), `analytics event served: ${event}`);
+}
+ok(
+  js.includes("https://vitals.vercel") || js.includes("va.vercel"),
+  "Vercel analytics/speed-insights instrumentation served",
+);
 
 if (failures.length) {
   console.error(`DEPLOYED_PRESENTATION_FAILED (${failures.length} checks)`);

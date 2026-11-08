@@ -10,8 +10,8 @@ export default function NotFound() {
       <h1 className="display max-w-[16ch]">The number you dialled is not in service.</h1>
       <SignalLine height={120} flat />
       <div>
-        <Link href="/#demo" className="key key--solid">
-          Call the agent instead <span className="arrow" aria-hidden="true">→</span>
+        <Link href="/" className="key key--solid">
+          Back to the agent <span className="arrow" aria-hidden="true">→</span>
         </Link>
       </div>
     </main>
