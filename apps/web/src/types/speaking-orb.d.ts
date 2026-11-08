@@ -5,7 +5,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       "speaking-orb": DetailedHTMLProps<
-        HTMLAttributes<HTMLElement> & { state?: string; particles?: number | string },
+        HTMLAttributes<HTMLElement> & { state?: string; level?: number | string; particles?: number | string },
         HTMLElement
       >;
     }

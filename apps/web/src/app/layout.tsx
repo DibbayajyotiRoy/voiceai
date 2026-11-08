@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Archivo, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -18,6 +18,13 @@ const jetbrains = JetBrains_Mono({
 const title = "voiceai: talk to a voice agent";
 const description =
   "Talk to an open voice-agent stack running live on AWS Bedrock Nova 2 Sonic. Tap the orb to call.";
+const ogImage = {
+  url: "/og-image.png",
+  width: 1200,
+  height: 630,
+  alt: "voiceai: a pink particle orb beside the headline Talk to a voice agent",
+  type: "image/png",
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://voiceai-presentation.vercel.app"),
@@ -29,13 +36,26 @@ export const metadata: Metadata = {
     description,
     url: "/",
     siteName: "voiceai",
+    locale: "en_US",
     type: "website",
+    images: [ogImage],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
+    creator: "@dibbayajyoti",
+    images: [ogImage],
   },
+  appleWebApp: {
+    title: "voiceai",
+    statusBarStyle: "black-translucent",
+    capable: true,
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#121513",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
