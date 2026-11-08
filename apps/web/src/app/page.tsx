@@ -9,7 +9,17 @@ export default function Page() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <p className="text-lg font-semibold tracking-tight">voiceai</p>
-          <p className="phase">by Dibbayajyoti Roy</p>
+          <p className="phase">
+            by{" "}
+            <a
+              href="https://dibbayajyoti.com"
+              target="_blank"
+              rel="noopener"
+              className="trace-link text-ink"
+            >
+              Dibbayajyoti Roy
+            </a>
+          </p>
         </div>
         <nav aria-label="Links" className="flex items-center gap-1 text-sm">
           <a
