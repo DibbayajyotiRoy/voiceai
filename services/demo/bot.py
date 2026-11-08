@@ -165,40 +165,59 @@ class _CallTimer(FrameProcessor):
 
     def __init__(self, metrics: CallMetrics) -> None:
         super().__init__()
-        self._metrics = metrics
+        # Not `_metrics`: FrameProcessor uses that name for its own metrics object.
+        self._call_metrics = metrics
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if direction == FrameDirection.DOWNSTREAM:
             ts = time.monotonic()
+            # Nova Sonic emits no User*SpeakingFrame; user turns come from _MeteredNovaSonic.
             if isinstance(frame, UserStartedSpeakingFrame):
-                self._metrics.on_user_started(ts)
+                self._call_metrics.on_user_started(ts)
             elif isinstance(frame, UserStoppedSpeakingFrame):
-                self._metrics.on_user_stopped(ts)
+                self._call_metrics.on_user_stopped(ts)
             elif isinstance(frame, BotStartedSpeakingFrame):
-                self._metrics.on_bot_started(ts)
+                self._call_metrics.on_bot_started(ts)
             elif isinstance(frame, BotStoppedSpeakingFrame):
-                self._metrics.on_bot_stopped(ts)
+                self._call_metrics.on_bot_stopped(ts)
         await self.push_frame(frame, direction)
 
 
 class _MeteredNovaSonic(AWSNovaSonicLLMService):
-    """Keeps Nova's speech/text token split, which pipecat's LLMTokenUsage collapses."""
+    """Keeps Nova's speech/text token split and marks user turns from its transcripts."""
 
     def __init__(self, *, metrics: CallMetrics, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._metrics = metrics
+        self._call_metrics = metrics  # not `_metrics`, which pipecat owns
+        self._user_in_turn = False
+
+    async def _report_user_transcription_text_added(self, text: Any) -> None:
+        if not self._user_in_turn:
+            self._user_in_turn = True
+            self._call_metrics.on_user_started(time.monotonic())
+        await super()._report_user_transcription_text_added(text)
+
+    async def _report_user_transcription_ended(self) -> None:
+        # Nova's end-of-turn decision; reply latency is measured from here.
+        if self._user_in_turn:
+            self._user_in_turn = False
+            self._call_metrics.on_user_stopped(time.monotonic())
+        await super()._report_user_transcription_ended()
 
     async def _handle_usage_event(self, event_json: Any) -> None:
-        delta = event_json.get("usageEvent", {}).get("details", {}).get("delta", {})
-        inp = delta.get("input", {})
-        out = delta.get("output", {})
-        self._metrics.add_usage(
-            speech_in=inp.get("speechTokens", 0),
-            text_in=inp.get("textTokens", 0),
-            speech_out=out.get("speechTokens", 0),
-            text_out=out.get("textTokens", 0),
-        )
+        try:
+            delta = event_json.get("usageEvent", {}).get("details", {}).get("delta", {})
+            inp = delta.get("input", {})
+            out = delta.get("output", {})
+            self._call_metrics.add_usage(
+                speech_in=inp.get("speechTokens", 0),
+                text_in=inp.get("textTokens", 0),
+                speech_out=out.get("speechTokens", 0),
+                text_out=out.get("textTokens", 0),
+            )
+        except Exception:  # metrics must never break the call
+            logger.exception("usage metering failed")
         await super()._handle_usage_event(event_json)
 
 

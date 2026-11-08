@@ -223,3 +223,13 @@ async def test_persist_skips_without_table_and_swallows_errors(
 
     monkeypatch.setattr(metrics, "_put_item", boom)
     await metrics.persist_report(report, region="us-east-1")  # must not raise
+
+
+def test_processors_do_not_shadow_pipecat_metrics() -> None:
+    # Regression: storing CallMetrics on `_metrics` replaced pipecat's own metrics
+    # object, so processor setup crashed and the agent never spoke.
+    from services.demo.bot import _CallTimer
+    from services.demo.metrics import CallMetrics
+
+    timer = _CallTimer(CallMetrics("x", "2026-11-08T00:00:00Z", 0.0, "m", "r"))
+    assert not isinstance(timer._metrics, CallMetrics)  # noqa: SLF001
