@@ -118,5 +118,14 @@ body {
 .key .arrow { display: inline-block; transition: translate 0.45s var(--ease); }
 .key:hover .arrow, .key:focus-visible .arrow { translate: 5px 0; }
 
+/* Wake progress: the pen dot breathes and the bar eases; both still under reduced motion. */
+.wake-dot { animation: wake-pulse 1.6s ease-in-out infinite; }
+@keyframes wake-pulse { 50% { opacity: 0.35; transform: scale(0.7); } }
+.wake-bar { transition: transform 0.9s var(--ease); }
+@media (prefers-reduced-motion: reduce) {
+  .wake-dot { animation: none; }
+  .wake-bar { transition: none; }
+}
+
 .skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--ink); color: var(--ground); padding: 0.6rem 1rem; }
 .skip:focus { left: 8px; }

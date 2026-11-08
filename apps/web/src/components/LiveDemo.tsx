@@ -5,6 +5,7 @@ import { gsap } from "gsap";
 import { track } from "@vercel/analytics";
 import { Orb, type OrbState } from "@/components/Orb";
 import { CallReport } from "@/components/CallReport";
+import { WakeProgress } from "@/components/WakeProgress";
 import { signal } from "@/lib/signal";
 import type { CallReportData } from "@/lib/report";
 
@@ -18,7 +19,13 @@ const REPORT_POLL_MS = 1000;
 const REPORT_MAX_MS = 15_000;
 const TALK_HOLD_FRAMES = 12; // about 200 ms at 60 fps before the orb switches talker
 
-type Backend = { state: "stopped" | "starting" | "ready"; url: string | null };
+type Backend = {
+  state: "stopped" | "starting" | "ready";
+  url: string | null;
+  stage?: string | null;
+  since_s?: number | null;
+};
+type WakeInfo = { stage: string | null; sinceS: number | null };
 type Phase = "idle" | "waking" | "connecting" | "live" | "error";
 type Talker = "listening" | "speaking";
 type ReportState =
@@ -75,6 +82,11 @@ async function fetchBackend(action: "start" | "status"): Promise<Backend> {
   return res.json();
 }
 
+const wakeFrom = (b: Backend): WakeInfo => ({
+  stage: b.stage ?? null,
+  sinceS: typeof b.since_s === "number" ? b.since_s : null,
+});
+
 function waitForIce(pc: RTCPeerConnection, maxMs: number) {
   if (pc.iceGatheringState === "complete") return Promise.resolve();
   return new Promise<void>((resolve) => {
@@ -121,14 +133,17 @@ export function LiveDemo() {
   const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState("");
   const [reportState, setReportState] = useState<ReportState>({ kind: "none" });
+  const [wake, setWake] = useState<WakeInfo>({ stage: null, sinceS: null });
 
   // Page load: count the visit, then wake the agent so it is often ready before the first click.
   useEffect(() => {
     track("presentation_started");
     if (CONTROL_URL) {
-      fetchBackend("start").catch(() => {
-        // Ignored: clicking the orb retries and reports errors.
-      });
+      fetchBackend("start")
+        .then((b) => setWake(wakeFrom(b)))
+        .catch(() => {
+          // Ignored: clicking the orb retries and reports errors.
+        });
     }
   }, []);
 
@@ -304,6 +319,7 @@ export function LiveDemo() {
     setReportState({ kind: "none" });
     setEnded(false);
     setPhase("waking");
+    setWake({ stage: null, sinceS: null });
     setMessage("");
     setElapsed(0);
     s.timers.push(
@@ -318,6 +334,7 @@ export function LiveDemo() {
 
     try {
       let b = await fetchBackend("start");
+      setWake(wakeFrom(b));
       while (b.state !== "ready" || !b.url) {
         if (Date.now() - s.t0 > WAKE_TIMEOUT_MS) {
           throw new Error("The agent did not wake up in time. Try again later.");
@@ -325,6 +342,7 @@ export function LiveDemo() {
         await sleep(POLL_MS);
         if (s.cancelled) return;
         b = await fetchBackend("status");
+        setWake(wakeFrom(b));
       }
       if (s.cancelled) return;
       setPhase("connecting");
@@ -374,15 +392,6 @@ export function LiveDemo() {
     status = "Live calls are off in this build.";
   } else if (phase === "idle") {
     status = `${message ? `${message} ` : ""}Tap to call.`;
-  } else if (phase === "waking") {
-    status = (
-      <>
-        Waking the agent on AWS. First call takes up to two minutes; it sleeps when unused.{" "}
-        <span aria-hidden="true">({elapsed}s)</span>
-        <br />
-        Honestly, I don&apos;t have enough money to keep AWS running it all day.
-      </>
-    );
   } else if (phase === "connecting") {
     status = "Connecting audio…";
   } else if (phase === "live") {
@@ -404,9 +413,13 @@ export function LiveDemo() {
         onClick={onOrb}
         buttonRef={orbRef}
       />
-      <p role="status" aria-live="polite" className="mono min-h-[3rem] max-w-[52ch] text-center text-sm text-muted">
-        {status}
-      </p>
+      {phase === "waking" ? (
+        <WakeProgress stage={wake.stage} sinceS={wake.sinceS} elapsed={elapsed} />
+      ) : (
+        <p role="status" aria-live="polite" className="mono min-h-[3rem] max-w-[52ch] text-center text-sm text-muted">
+          {status}
+        </p>
+      )}
       {reportState.kind === "pending" && <p className="mono text-sm text-muted">Preparing the call report…</p>}
       {reportState.kind === "unavailable" && (
         <p className="mono max-w-[52ch] text-center text-sm text-muted">

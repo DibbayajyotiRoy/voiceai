@@ -1,7 +1,8 @@
 """Control plane for the demo Fargate task (Lambda + Function URL + 5-min sweep).
 
 POST /start        -> ECS desiredCount 0 -> 1
-GET  /status       -> stopped | starting | ready (+ url once https /health answers)
+GET  /status       -> stopped | starting | ready (+ url once https /health answers,
+                       stage = stopped|provisioning|pulling|starting|securing|ready, since_s)
 GET  /admin/summary -> superadmin view: backend state, call history, totals, AWS cost.
                        Requires `Authorization: Bearer <voiceai/admin-token>`.
 EventBridge  -> stop the task when idle (active == 0 and idle > 15 min) or after 60 min.
@@ -30,6 +31,7 @@ VERCEL_SECRET_ID = os.environ.get("VERCEL_SECRET_ID", "voiceai/vercel-token")
 VERCEL_TEAM_ID = os.environ.get("VERCEL_TEAM_ID", "")
 ADMIN_TOKEN_SECRET = os.environ.get("ADMIN_TOKEN_SECRET", "voiceai/admin-token")
 DEMO_CALLS_TABLE = os.environ.get("DEMO_CALLS_TABLE", "voiceai-demo-calls")
+APP_CONTAINER = "app"  # container name in deploy/aws/demo.yaml
 
 IDLE_LIMIT_S = 900
 MAX_RUNTIME_S = 3600
@@ -66,14 +68,15 @@ def _set_desired(n: int) -> None:
 
 
 def _running_task() -> dict[str, Any] | None:
-    """Newest RUNNING/PENDING task with its public IP, or None."""
+    """Newest non-stopped task (provisioning..running) with its public IP, or None."""
     arns = ecs.list_tasks(cluster=CLUSTER, serviceName=SERVICE, desiredStatus="RUNNING")["taskArns"]
     if not arns:
         return None
-    tasks = ecs.describe_tasks(cluster=CLUSTER, tasks=arns)["tasks"]
+    described = ecs.describe_tasks(cluster=CLUSTER, tasks=arns)["tasks"]
+    tasks = [t for t in described if t["lastStatus"] != "STOPPED"]
     if not tasks:
         return None
-    task = max(tasks, key=lambda t: t.get("startedAt") or datetime.min.replace(tzinfo=UTC))
+    task = max(tasks, key=lambda t: t.get("createdAt") or datetime.min.replace(tzinfo=UTC))
     ip = None
     for att in task.get("attachments", []):
         if att.get("type") != "ElasticNetworkInterface":
@@ -86,9 +89,14 @@ def _running_task() -> dict[str, Any] | None:
                 "NetworkInterfaces"
             ][0]
             ip = eni.get("Association", {}).get("PublicIp")
+    app = next((c for c in task.get("containers", []) if c.get("name") == APP_CONTAINER), {})
     return {
         "lastStatus": task["lastStatus"],
+        "createdAt": task.get("createdAt"),
         "startedAt": task.get("startedAt"),
+        "pullStartedAt": task.get("pullStartedAt"),
+        "pullStoppedAt": task.get("pullStoppedAt"),
+        "app_health": app.get("healthStatus"),
         "ip": ip,
     }
 
@@ -155,16 +163,37 @@ def start() -> dict[str, Any]:
     return status()
 
 
+def _stage(task: dict[str, Any] | None) -> str:
+    """Startup stage of a non-stopped task. 'securing' means ready pending the https check."""
+    if task is None:
+        return "provisioning"
+    last = task["lastStatus"]
+    if last == "PROVISIONING" or (last in ("PENDING", "ACTIVATING") and not task["pullStartedAt"]):
+        return "provisioning"
+    if last in ("PENDING", "ACTIVATING") and not task["pullStoppedAt"]:
+        return "pulling"
+    # No healthStatus means the task def sets no container healthCheck (demo.yaml has none).
+    if last != "RUNNING" or task["ip"] is None or task["app_health"] not in (None, "HEALTHY"):
+        return "starting"
+    return "securing"
+
+
 def status() -> dict[str, Any]:
     if _desired() == 0:
-        return {"state": "stopped", "url": None}
+        return {"state": "stopped", "url": None, "stage": "stopped", "since_s": None}
     task = _running_task()
-    if task is None or task["ip"] is None:
-        return {"state": "starting", "url": None}
-    _ensure_dns(task["ip"])
-    if task["lastStatus"] == "RUNNING" and _healthy():
-        return {"state": "ready", "url": f"https://{PUBLIC_HOST}"}
-    return {"state": "starting", "url": None}
+    since_s = None if task is None else (datetime.now(UTC) - task["createdAt"]).total_seconds()
+    if task is not None and task["ip"] is not None:
+        _ensure_dns(task["ip"])
+    stage = _stage(task)
+    if stage == "securing" and _healthy():
+        return {
+            "state": "ready",
+            "url": f"https://{PUBLIC_HOST}",
+            "stage": "ready",
+            "since_s": since_s,
+        }
+    return {"state": "starting", "url": None, "stage": stage, "since_s": since_s}
 
 
 def sweep(now: float | None = None) -> dict[str, Any]:

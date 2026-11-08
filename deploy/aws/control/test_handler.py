@@ -34,11 +34,17 @@ class FakeECS:
         return {"tasks": self.tasks}
 
 
-def task(last="RUNNING", started=None):
-    return {
+def task(last="RUNNING", started=None, **extra):
+    """Task created 60s ago, image pulled, app container HEALTHY; override via kwargs."""
+    now = datetime.now(UTC)
+    base = {
         "taskArn": "arn:task",
         "lastStatus": last,
-        "startedAt": started or datetime.now(UTC),
+        "createdAt": now - timedelta(seconds=60),
+        "startedAt": started or now,
+        "pullStartedAt": now - timedelta(seconds=50),
+        "pullStoppedAt": now - timedelta(seconds=40),
+        "containers": [{"name": "app", "healthStatus": "HEALTHY"}],
         "attachments": [
             {
                 "type": "ElasticNetworkInterface",
@@ -46,6 +52,7 @@ def task(last="RUNNING", started=None):
             }
         ],
     }
+    return {**base, **extra}
 
 
 def install(monkeypatch, ecs, ip="203.0.113.7", health=True, idle=None, dns=None):
@@ -84,24 +91,70 @@ def test_start_idempotent_when_already_one(monkeypatch):
 
 def test_status_stopped_when_desired_zero(monkeypatch):
     install(monkeypatch, FakeECS(desired=0))
-    assert handler.status() == {"state": "stopped", "url": None}
+    assert handler.status() == {
+        "state": "stopped",
+        "url": None,
+        "stage": "stopped",
+        "since_s": None,
+    }
 
 
-def test_status_starting_without_task(monkeypatch):
+def test_status_provisioning_when_desired_one_without_task(monkeypatch):
     install(monkeypatch, FakeECS(desired=1, tasks=[]))
-    assert handler.status() == {"state": "starting", "url": None}
+    assert handler.status() == {
+        "state": "starting",
+        "url": None,
+        "stage": "provisioning",
+        "since_s": None,
+    }
+
+
+def test_status_provisioning_while_task_provisioning(monkeypatch):
+    install(monkeypatch, FakeECS(desired=1, tasks=[task(last="PROVISIONING")]))
+    out = handler.status()
+    assert (out["state"], out["stage"]) == ("starting", "provisioning")
+    assert out["since_s"] == pytest.approx(60, abs=5)
+
+
+def test_status_pulling_between_pull_start_and_stop(monkeypatch):
+    install(monkeypatch, FakeECS(desired=1, tasks=[task(last="PENDING", pullStoppedAt=None)]))
+    assert handler.status()["stage"] == "pulling"
+
+
+def test_status_starting_after_pull_while_pending(monkeypatch):
+    install(monkeypatch, FakeECS(desired=1, tasks=[task(last="PENDING")]))
+    out = handler.status()
+    assert (out["state"], out["stage"]) == ("starting", "starting")
+
+
+def test_status_starting_when_app_container_unhealthy(monkeypatch):
+    unhealthy = [{"name": "app", "healthStatus": "UNHEALTHY"}]
+    dns = []
+    install(monkeypatch, FakeECS(desired=1, tasks=[task(containers=unhealthy)]), dns=dns)
+    out = handler.status()
+    assert (out["state"], out["stage"]) == ("starting", "starting")
+    assert dns == ["203.0.113.7"]  # IP is known, so DNS still gets pointed
+
+
+def test_status_securing_when_healthy_but_https_down(monkeypatch):
+    install(monkeypatch, FakeECS(desired=1, tasks=[task()]), health=False)
+    out = handler.status()
+    assert (out["state"], out["stage"], out["url"]) == ("starting", "securing", None)
 
 
 def test_status_ready_points_dns_and_returns_url(monkeypatch):
     dns = []
     install(monkeypatch, FakeECS(desired=1, tasks=[task()]), dns=dns)
-    assert handler.status() == {"state": "ready", "url": "https://demo-api.dibbayajyoti.com"}
+    out = handler.status()
+    assert (out["state"], out["stage"]) == ("ready", "ready")
+    assert out["url"] == "https://demo-api.dibbayajyoti.com"
+    assert out["since_s"] == pytest.approx(60, abs=5)
     assert dns == ["203.0.113.7"]
 
 
-def test_status_starting_when_health_fails(monkeypatch):
-    install(monkeypatch, FakeECS(desired=1, tasks=[task()]), health=False)
-    assert handler.status() == {"state": "starting", "url": None}
+def test_status_ignores_stopped_tasks(monkeypatch):
+    install(monkeypatch, FakeECS(desired=1, tasks=[task(last="STOPPED")]))
+    assert handler.status()["stage"] == "provisioning"
 
 
 def test_status_starting_while_pending(monkeypatch):
@@ -287,7 +340,7 @@ def test_admin_200_shape_with_stubbed_dynamo_and_ce(admin):
     assert out["statusCode"] == 200
     body = json.loads(out["body"])  # also proves Decimals were converted
 
-    assert body["backend"] == {"state": "stopped", "url": None}
+    assert body["backend"] == {"state": "stopped", "url": None, "stage": "stopped", "since_s": None}
     assert body["totals"] == {
         "calls": 3,
         "minutes": 4.0,
