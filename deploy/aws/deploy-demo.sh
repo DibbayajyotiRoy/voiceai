@@ -20,6 +20,15 @@ ARTIFACTS="voiceai-demo-artifacts-$ACCOUNT"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
+# A deploy replaces the running task, which cuts any live call. Refuse unless FORCE=1.
+DEMO_URL="${DEMO_URL:-https://demo-api.dibbayajyoti.com}"
+ACTIVE="$(curl -fsS --max-time 5 "$DEMO_URL/api/demo/idle-seconds" 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("active", 0))' 2>/dev/null || echo 0)"
+if [ "${ACTIVE:-0}" -gt 0 ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "!! $ACTIVE live call(s) on the demo. Deploying now would cut them. Retry later or set FORCE=1." >&2
+  exit 1
+fi
+
 echo "==> Artifacts bucket s3://$ARTIFACTS (control Lambda code)"
 if ! aws s3api head-bucket --bucket "$ARTIFACTS" >/dev/null 2>&1; then
   if [ "$REGION" = "us-east-1" ]; then

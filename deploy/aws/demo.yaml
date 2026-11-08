@@ -329,9 +329,9 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       PlatformVersion: LATEST
-      # Always 0 in the template. The control Lambda sets 1 on /start. Note: a CloudFormation
-      # update resets this to 0, so redeploy only when the demo is idle.
-      DesiredCount: 0
+      # No DesiredCount on purpose: the control Lambda owns it (1 on /start, 0 when idle).
+      # Pinning it here made every stack update stop the task mid-call. First create starts
+      # one task; the idle sweep stops it after 15 minutes.
       # One-task demo: stop the old task before starting the new one (no double cost).
       DeploymentConfiguration:
         MinimumHealthyPercent: 0
