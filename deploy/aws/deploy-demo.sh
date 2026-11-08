@@ -45,25 +45,38 @@ echo "==> Package template (uploads deploy/aws/control)"
 aws cloudformation package --region "$REGION" --template-file "$TEMPLATE" \
   --s3-bucket "$ARTIFACTS" --output-template-file "$BUILD_DIR/packaged.yaml" >/dev/null
 
-echo "==> Deploy stack $STACK (image tag $TAG)"
-# desiredCount is 0 in the template, so the image does not have to exist before this step.
-aws cloudformation deploy --region "$REGION" --stack-name "$STACK" \
-  --template-file "$BUILD_DIR/packaged.yaml" --capabilities CAPABILITY_IAM \
-  --parameter-overrides "ImageTag=$TAG" "VercelTeamId=${VERCEL_TEAM_ID:-}" --no-fail-on-empty-changeset
-
 output() {
   aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
     --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
 }
-REPO_URI="$(output EcrRepositoryUri)"
-REGISTRY="${REPO_URI%%/*}"
+deploy_stack() {
+  echo "==> Deploy stack $STACK (image tag $TAG)"
+  aws cloudformation deploy --region "$REGION" --stack-name "$STACK" \
+    --template-file "$BUILD_DIR/packaged.yaml" --capabilities CAPABILITY_IAM \
+    --parameter-overrides "ImageTag=$TAG" "VercelTeamId=${VERCEL_TEAM_ID:-}" --no-fail-on-empty-changeset
+}
+push_image() {
+  REPO_URI="$(output EcrRepositoryUri)"
+  echo "==> Build linux/amd64 image and push $REPO_URI:$TAG"
+  aws ecr get-login-password --region "$REGION" \
+    | docker login --username AWS --password-stdin "${REPO_URI%%/*}" >/dev/null
+  BUILDER="voiceai-demo-builder"
+  docker buildx inspect "$BUILDER" >/dev/null 2>&1 \
+    || docker buildx create --name "$BUILDER" --driver docker-container >/dev/null
+  docker buildx build --builder "$BUILDER" --platform linux/amd64 \
+    --tag "$REPO_URI:$TAG" --push "$ROOT"
+}
 
-echo "==> Build linux/amd64 image and push $REPO_URI:$TAG"
-aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
-BUILDER="voiceai-demo-builder"
-docker buildx inspect "$BUILDER" >/dev/null 2>&1 || docker buildx create --name "$BUILDER" --driver docker-container >/dev/null
-docker buildx build --builder "$BUILDER" --platform linux/amd64 \
-  --tag "$REPO_URI:$TAG" --push "$ROOT"
+# Push the image BEFORE the task definition points at it; otherwise a task started in
+# between fails with "image not found". Only the very first deploy (no ECR repo yet)
+# must create the stack first.
+if aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" >/dev/null 2>&1; then
+  push_image
+  deploy_stack
+else
+  deploy_stack
+  push_image
+fi
 
 echo "==> Done"
 echo "Control URL: $(output ControlUrl)"

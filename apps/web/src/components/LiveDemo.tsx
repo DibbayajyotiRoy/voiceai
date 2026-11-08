@@ -379,6 +379,8 @@ export function LiveDemo() {
       <>
         Waking the agent on AWS. First call takes up to two minutes; it sleeps when unused.{" "}
         <span aria-hidden="true">({elapsed}s)</span>
+        <br />
+        Honestly, I don&apos;t have enough money to keep AWS running it all day.
       </>
     );
   } else if (phase === "connecting") {
