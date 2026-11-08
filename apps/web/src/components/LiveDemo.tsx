@@ -53,6 +53,19 @@ function rms(an: AnalyserNode) {
   return Math.min(1, Math.sqrt(sum / meterBuf.length) * 4);
 }
 
+const freqBuf = new Uint8Array(1024);
+/** Mean spectral energy (0..1) of an analyser between two frequencies. */
+function band(an: AnalyserNode, lo: number, hi: number) {
+  const n = an.frequencyBinCount;
+  an.getByteFrequencyData(freqBuf.subarray(0, n));
+  const hz = an.context.sampleRate / 2 / n;
+  const a = Math.max(1, Math.floor(lo / hz));
+  const b = Math.min(n - 1, Math.ceil(hi / hz));
+  let sum = 0;
+  for (let i = a; i <= b; i++) sum += freqBuf[i];
+  return sum / ((b - a + 1) * 255);
+}
+
 async function fetchBackend(action: "start" | "status"): Promise<Backend> {
   const res = await fetch(`${CONTROL_URL}/${action}`, {
     method: action === "start" ? "POST" : "GET",
@@ -85,6 +98,8 @@ function teardown(s: Session) {
   signal.level = 0;
   signal.mic = 0;
   signal.agent = 0;
+  signal.voice = 0;
+  signal.hiss = 0;
   signal.live = false;
   s.pc?.close();
   s.stream?.getTracks().forEach((t) => t.stop());
@@ -240,9 +255,18 @@ export function LiveDemo() {
     s.tick = () => {
       const mic = s.mic ? rms(s.mic) : 0;
       let agent = 0;
-      for (const m of s.agentMeters) agent = Math.max(agent, rms(m));
+      let voice = 0;
+      let hiss = 0;
+      for (const m of s.agentMeters) {
+        agent = Math.max(agent, rms(m));
+        // ponytail: gains hand-tuned for Nova's voice; retune if the model or voice changes.
+        voice = Math.max(voice, Math.min(1, band(m, 300, 3400) * 2.2));
+        hiss = Math.max(hiss, Math.min(1, band(m, 3400, 8000) * 4));
+      }
       signal.mic = mic;
       signal.agent = agent;
+      signal.voice = voice;
+      signal.hiss = hiss;
       signal.level = Math.max(mic, agent);
       signal.live = true;
       // The orb switches talker only after the other side has held the floor briefly.

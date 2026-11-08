@@ -21,6 +21,7 @@ const VENDOR: Record<OrbState, Vendor> = {
 
 /** The vendored element's public surface we touch (see public/vendor/speaking-orb.js). */
 type OrbEl = HTMLElement & {
+  envFn?: () => number;
   weights?: number[];
   draw?: (t: number) => void;
   start?: () => void;
@@ -70,10 +71,19 @@ export function Orb({
     if (!el) return;
     const still = prefersReducedMotion();
     let lastLevel = "";
+    // Speech-band energy drives the swell and a ring per syllable (see "voiceai patch").
+    el.envFn = () => (stateRef.current === "speaking" ? signal.voice : 0);
     const tick = () => {
       const s = stateRef.current;
+      // Speaking: sibilant energy adds fast surface ripple on top of loudness.
       const level =
-        s === "ended" || s === "disabled" ? 0 : s === "listening" ? signal.mic : s === "speaking" ? signal.agent : 0.15;
+        s === "ended" || s === "disabled"
+          ? 0
+          : s === "listening"
+            ? signal.mic
+            : s === "speaking"
+              ? Math.min(1, signal.agent * 0.6 + signal.hiss * 1.2)
+              : 0.15;
       const v = level.toFixed(3);
       if (v !== lastLevel) {
         el.setAttribute("level", v);

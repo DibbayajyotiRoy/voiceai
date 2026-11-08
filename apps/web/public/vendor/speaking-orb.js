@@ -1,5 +1,5 @@
 /*
- * speaking-orb (vendored, unmodified component body).
+ * speaking-orb (vendored; one marked "voiceai patch" adds an external envelope hook, envFn).
  * Source: https://raw.githubusercontent.com/aqualang89/shipnotes-components/main/components/speaking-orb/speaking-orb.js
  * Author: aqualang89 (shipnotes-components)
  * License: MIT License
@@ -193,6 +193,8 @@
         else raw=pulseEnv(L.words,lt);
         const end=L.done??(L.words.at(-1)?.end??0),over=L.audio?L.audio.ended:lt>end+.1;
         if(over&&this.state==='speaking'&&!L.after){L.after=true;this.state=this.getAttribute('rest')||'listening';this.dispatchEvent(new CustomEvent('end'));}}
+      // voiceai patch: external envelope (live WebRTC audio) when no say() line is playing.
+      else if(this.envFn)raw=clamp(this.envFn());
       const prev=this.env;this.env+=(raw-this.env)*(raw>this.env?.55:.18);
       // a syllable is a fast rise in the envelope; each one sends a bright ring up the sphere
       if(this.env-prev>.06&&this.time-(this.onsets.at(-1)??-1)>.12)this.onsets.push(this.time);
