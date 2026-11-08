@@ -172,8 +172,9 @@ def _stage(task: dict[str, Any] | None) -> str:
         return "provisioning"
     if last in ("PENDING", "ACTIVATING") and not task["pullStoppedAt"]:
         return "pulling"
-    # No healthStatus means the task def sets no container healthCheck (demo.yaml has none).
-    if last != "RUNNING" or task["ip"] is None or task["app_health"] not in (None, "HEALTHY"):
+    # Without a container healthCheck (demo.yaml has none) ECS reports UNKNOWN, not absent.
+    # Only an explicit UNHEALTHY holds the stage; the https /health check gates "ready".
+    if last != "RUNNING" or task["ip"] is None or task["app_health"] == "UNHEALTHY":
         return "starting"
     return "securing"
 

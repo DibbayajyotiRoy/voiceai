@@ -377,3 +377,10 @@ def test_admin_cost_cached_for_six_hours(admin):
     handler.handler(admin_event(f"Bearer {TOKEN}"), None)
     assert first == 2
     assert admin.ce.calls == 2  # second request served from cache
+
+
+def test_unknown_container_health_still_reaches_securing() -> None:
+    # Regression: ECS reports UNKNOWN when no container healthCheck exists; treating it as
+    # "not healthy" kept every task at "starting" forever and nobody could call.
+    task = {"lastStatus": "RUNNING", "ip": "1.2.3.4", "app_health": "UNKNOWN"}
+    assert handler._stage(task) == "securing"
