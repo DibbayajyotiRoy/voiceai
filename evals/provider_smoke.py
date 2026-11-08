@@ -25,6 +25,18 @@ import sys
 from services.providers.base import LLMRequest
 
 
+def _aws_credentials_available() -> bool:
+    """True if boto3 can resolve credentials (env, shared file, SSO, IAM role)."""
+    try:
+        import boto3
+
+        session = boto3.Session()
+        credentials = session.get_credentials()
+        return credentials is not None
+    except Exception:
+        return False
+
+
 async def run() -> bool:
     openrouter_keys = [
         value
@@ -32,7 +44,7 @@ async def run() -> bool:
         if name.startswith("OPENROUTER_API_KEY") and value
     ]
     bedrock_model = os.environ.get("BEDROCK_MODEL_ID", "")
-    have_aws = bool(os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE"))
+    have_aws = _aws_credentials_available()
 
     if not openrouter_keys and not (bedrock_model and have_aws):
         print(
@@ -53,6 +65,7 @@ async def run() -> bool:
             events = []
             async for event in llm.stream(
                 LLMRequest(
+                    instructions="Answer concisely in German.",
                     call_id="smoke",
                     turn_id="t1",
                     generation=0,
@@ -78,7 +91,13 @@ async def run() -> bool:
         )
         events = []
         async for event in llm.stream(
-            LLMRequest(call_id="smoke", turn_id="t1", generation=0, prompt="Say ready.")
+            LLMRequest(
+                instructions="Answer with one word.",
+                call_id="smoke",
+                turn_id="t1",
+                generation=0,
+                prompt="Say ready.",
+            )
         ):
             events.append(event)
         if not any(e.kind == "completed" for e in events):
