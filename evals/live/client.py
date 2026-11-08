@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportMissingTypeStubs=false, reportCallIssue=false, reportAttributeAccessIssue=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportOptionalMemberAccess=false, reportGeneralTypeIssues=false, reportMissingTypeArgument=false, reportPrivateUsage=false
 """Client-side WebRTC voice-to-voice latency measurement against the live demo.
 
 Plays pre-recorded 16 kHz mono WAV questions in real time over an aiortc peer
@@ -20,13 +21,11 @@ import aiohttp
 import numpy as np
 import soundfile as sf
 from aiortc import (
-    RTCIceCandidate,
-    RTCPeerConnection,
-    RTCSessionDescription,
     MediaStreamError,
     MediaStreamTrack,
+    RTCPeerConnection,
+    RTCSessionDescription,
 )
-from aiortc.contrib.signaling import candidate_from_sdp
 from av import AudioFrame
 
 BASE = "https://demo-api.dibbayajyoti.com"
@@ -139,7 +138,7 @@ async def run(questions: list[str], wav_dir: Path, out: Path, call_budget_s: flo
 
     await pc.setLocalDescription(await pc.createOffer())
     # wait for ICE gathering
-    while pc.iceGatheringState != "complete":
+    while pc.iceGatheringState != "complete":  # noqa: ASYNC110
         await asyncio.sleep(0.05)
     t_offer = time.time()
     async with aiohttp.ClientSession() as sess:
@@ -163,7 +162,6 @@ async def run(questions: list[str], wav_dir: Path, out: Path, call_budget_s: flo
     results = []
     t_call_end = t_offer + call_budget_s
     spoken_idx = 0
-    last_log = 0.0
     while time.time() < t_call_end and spoken_idx < len(questions):
         await asyncio.sleep(0.05)
         # find first question whose agent response has started
@@ -190,7 +188,7 @@ async def run(questions: list[str], wav_dir: Path, out: Path, call_budget_s: flo
     # dump raw inbound audio (decoded opus runs at 48 kHz)
     pcm = recorder.pcm()
     sf.write(str(out / "inbound.wav"), pcm, 48000)
-    with open(out / "inbound_frames.jsonl", "w") as f:
+    with open(out / "inbound_frames.jsonl", "w") as f:  # noqa: ASYNC230
         for t, a in recorder.frames:
             f.write(json.dumps({"t": t - t_offer, "rms": energy(a)}) + "\n")
     await pc.close()
@@ -209,7 +207,7 @@ def main() -> None:
     with open(out / "client_latency.json", "w") as f:
         json.dump(stats, f, indent=2)
     for r in stats["results"]:
-        print(f'{r["question"]}: v2v={r["v2v_latency_s"]:.2f}s')
+        print(f"{r['question']}: v2v={r['v2v_latency_s']:.2f}s")
     print("pc_id:", stats["pc_id"], "offer_rtt:", round(stats["offer_rtt_s"], 2))
 
 

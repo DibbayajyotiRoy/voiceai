@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportMissingTypeStubs=false, reportCallIssue=false, reportAttributeAccessIssue=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportOptionalMemberAccess=false, reportGeneralTypeIssues=false, reportMissingTypeArgument=false, reportPrivateUsage=false
 """Barge-in test v2: robust agent-speech detection before injecting the interrupt.
 
 All timing uses one clock (wall time of inbound frame delivery, same as client.py).
@@ -7,6 +8,7 @@ frames are above the energy threshold.
 
 import asyncio
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -15,10 +17,8 @@ import numpy as np
 import soundfile as sf
 from aiortc import RTCPeerConnection, RTCSessionDescription
 
-import sys
-
 sys.path.insert(0, str(Path(__file__).parent))
-from client import InboundRecorder, ScheduledPlayer, energy, OFFER_URL
+from client import OFFER_URL, InboundRecorder, ScheduledPlayer, energy
 
 THRESH = 0.01
 
@@ -27,7 +27,7 @@ def sustained_speech_start(frames, after_t, frac=0.8, win_s=1.0):
     """First t >= after_t such that >=frac of frames in [t, t+win_s] are loud."""
     ts = np.array([t for t, _ in frames])
     loud = np.array([energy(a) > THRESH for _, a in frames])
-    for i, t in enumerate(ts):
+    for _i, t in enumerate(ts):
         if t < after_t:
             continue
         mask = (ts >= t) & (ts < t + win_s)
@@ -58,16 +58,18 @@ async def run(out: Path) -> dict:
             player.gate.set()
 
     await pc.setLocalDescription(await pc.createOffer())
-    while pc.iceGatheringState != "complete":
+    while pc.iceGatheringState != "complete":  # noqa: ASYNC110
         await asyncio.sleep(0.05)
     async with aiohttp.ClientSession() as sess:
         async with sess.post(
-            OFFER_URL, json={"sdp": pc.localDescription.sdp, "type": "offer"}, timeout=30
+            OFFER_URL,
+            json={"sdp": pc.localDescription.sdp, "type": "offer"},
+            timeout=aiohttp.ClientTimeout(total=30),
         ) as res:
             answer = await res.json()
     pc_id = answer.get("pc_id", "unknown")
     await pc.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type="answer"))
-    while player._t0 is None:
+    while player._t0 is None:  # noqa: ASYNC110
         await asyncio.sleep(0.02)
     t0 = player._t0
     q_end = t0 + player.clip_ends[0]
@@ -103,7 +105,7 @@ async def run(out: Path) -> dict:
     sent_during = player._idx - sent_before
     pcm = recorder.pcm()
     sf.write(str(out / "inbound.wav"), pcm, 48000)
-    with open(out / "inbound_frames.jsonl", "w") as f:
+    with open(out / "inbound_frames.jsonl", "w") as f:  # noqa: ASYNC230
         for t, a in recorder.frames:
             f.write(json.dumps({"t": t - t0, "rms": energy(a)}) + "\n")
     await pc.close()
