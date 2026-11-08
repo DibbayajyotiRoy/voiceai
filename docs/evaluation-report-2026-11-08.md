@@ -67,9 +67,27 @@ misses its own 250 ms target, and the interruption counter itself does not class
 | G7 providers | `evals.provider_smoke` | **MET for Bedrock 2026-11-08**: `AWS_REGION=eu-central-1 BEDROCK_MODEL_ID=eu.anthropic.claude-haiku-4-5-20251001-v1:0` → "✓ bedrock stream ok / REAL_PROVIDER_SMOKE_PASSED" (account finished AWS verification during this evaluation; EU inference-profile ID required). OpenRouter path: no `OPENROUTER_API_KEY` in this environment — PENDING |
 | G8 speech | `evals.speech_release` | **BLOCKED honestly**: "requires the optional [speech] extras: uv sync --extra speech". Frozen holdout WER remains PENDING (GPU box) |
 
-### 3.2 Cold start (3 wake cycles from `stopped`)
+### 3.2 Cold start (3 valid wake cycles from a genuinely-stopped state, 2026-11-08 evening)
 
-<!-- COLD_START_PLACEHOLDER -->
+A cycle was only accepted when (a) the control API reported `stopped` **and** the agent health
+endpoint was unreachable, and (b) startup traversed real stages (instant-ready cycles — an
+observed race where `/status` reports `stopped` while the old task is still draining — were
+discarded; the v1 attempt produced two fake 2.7 s "cold starts" this way and was thrown out).
+
+| Cycle | provisioning (ECS + image pull + container start) | securing (TLS + health gate) | Total to ready |
+|---|---|---|---|
+| 1 | 58.7 s | 20.0 s | **81.2 s** |
+| 2 | 38.8 s | 3.3 s | **44.5 s** |
+| 3 | 48.6 s | 3.9 s | **54.3 s** |
+| p50 / max | — | — | **54.3 s / 81.2 s** |
+
+Two honest details in this data: (1) cycle 1's 20 s `securing` phase vs ~3–4 s afterwards is the
+Caddy TLS path — the certificate is cached on EFS across restarts, exactly as `deploy/aws/README.md`
+predicts ("Without that, each start issues a cert… Let's Encrypt allows 5 per exact domain per
+week"). (2) The dominant cost is the ECS/image-pull/container-start phase (39–59 s), not TLS —
+matching the demo prompt's own claim that "the first call takes about a minute to wake it."
+Cycles were woken by POST /start only when no call was active; nothing else on the AWS side was
+touched.
 
 ### 3.3 Latency: client-measured vs server-measured
 
@@ -212,7 +230,7 @@ speech-to-slice demo (the full STT design has one, and the local demo test verif
 
 ## 6. Raw data and rerun commands
 
-Raw captures (git-ignored, regenerate as below): `evals/live/data/{latency1,quality2,interrupt2,interrupt4,smoke}/`
+Raw captures (git-ignored, regenerate as below): `evals/live/data/{latency1,quality2,interrupt2,interrupt4,smoke}/`, plus `coldstart.json`
 (`client_latency.json`, `server_report.json`, `inbound.wav`, `inbound_frames.jsonl`, whisper transcripts).
 
 ```bash
@@ -276,186 +294,235 @@ EOF
 ### Appendix: per-call JSON (measured)
 
 ```json
-[
- {
-  "run": "interrupt2",
-  "call_id": "SmallWebRTCConnection#12-020f4530fb184704a07c8734d59d8cf0",
-  "duration_s": 19.4,
-  "turns": 2,
-  "interruptions": 0,
-  "user_talk_s": 1.0,
-  "agent_talk_s": 8.2,
-  "latency_ms": {
-   "p50": 125.6,
-   "p95": 166.8,
-   "min": 125.6,
-   "max": 166.8
+{
+ "per_call": [
+  {
+   "run": "interrupt2",
+   "call_id": "SmallWebRTCConnection#12-020f4530fb184704a07c8734d59d8cf0",
+   "duration_s": 19.4,
+   "turns": 2,
+   "interruptions": 0,
+   "user_talk_s": 1.0,
+   "agent_talk_s": 8.2,
+   "latency_ms": {
+    "p50": 125.6,
+    "p95": 166.8,
+    "min": 125.6,
+    "max": 166.8
+   },
+   "tokens": {
+    "speech_in": 308,
+    "speech_out": 481,
+    "text_in": 2138,
+    "text_out": 139
+   },
+   "est_cost_usd": 0.007784,
+   "latency_basis": "model_end_of_turn",
+   "interrupt": {
+    "agent_answer_start_s": 3.788,
+    "interrupt_started_s": 6.288,
+    "interrupt_ended_s": 10.176,
+    "interrupt_frames_sent": 194,
+    "agent_audio_last_loud_s": 15.27,
+    "interrupt_end_to_agent_stop_s": 5.094
+   }
   },
-  "tokens": {
-   "speech_in": 308,
-   "speech_out": 481,
-   "text_in": 2138,
-   "text_out": 139
+  {
+   "run": "interrupt4",
+   "call_id": "SmallWebRTCConnection#14-58098eb758ab460f904701179c8a3e5c",
+   "duration_s": 14.3,
+   "turns": 2,
+   "interruptions": 0,
+   "user_talk_s": 1.0,
+   "agent_talk_s": 3.8,
+   "latency_ms": {
+    "p50": 126.9,
+    "p95": 127.1,
+    "min": 126.9,
+    "max": 127.1
+   },
+   "tokens": {
+    "speech_in": 251,
+    "speech_out": 512,
+    "text_in": 2138,
+    "text_out": 128
+   },
+   "est_cost_usd": 0.007955,
+   "latency_basis": "model_end_of_turn",
+   "interrupt": {
+    "agent_answer_start_s": 3.841,
+    "interrupt_started_s": 6.341,
+    "interrupt_ended_s": 8.213,
+    "interrupt_frames_sent": 93,
+    "agent_audio_last_loud_s": 10.041,
+    "interrupt_end_to_agent_stop_s": 1.828
+   }
   },
-  "est_cost_usd": 0.007784,
-  "latency_basis": "model_end_of_turn",
-  "interrupt": {
-   "agent_answer_start_s": 3.788,
-   "interrupt_started_s": 6.288,
-   "interrupt_ended_s": 10.176,
-   "interrupt_frames_sent": 194,
-   "agent_audio_last_loud_s": 15.27,
-   "interrupt_end_to_agent_stop_s": 5.094
+  {
+   "run": "latency1",
+   "call_id": "SmallWebRTCConnection#2-a2d5c18d1e9d4361a688db4406ecbfea",
+   "duration_s": 42.4,
+   "turns": 10,
+   "interruptions": 0,
+   "user_talk_s": 5.2,
+   "agent_talk_s": 13.4,
+   "latency_ms": {
+    "p50": 132.5,
+    "p95": 166.1,
+    "min": 129.7,
+    "max": 166.1
+   },
+   "tokens": {
+    "speech_in": 746,
+    "speech_out": 2135,
+    "text_in": 2192,
+    "text_out": 526
+   },
+   "est_cost_usd": 0.030028,
+   "latency_basis": "model_end_of_turn",
+   "client_v2v_s": [
+    1.121,
+    1.043,
+    1.103,
+    1.201,
+    1.056,
+    0.862,
+    0.861,
+    1.162,
+    1.044,
+    1.162
+   ],
+   "offer_rtt_s": 5.99
+  },
+  {
+   "run": "quality1",
+   "call_id": "SmallWebRTCConnection#15-60d494159b5a4b99a3e2ea18a8b95047",
+   "duration_s": 63.5,
+   "turns": 14,
+   "interruptions": 0,
+   "user_talk_s": 10.2,
+   "agent_talk_s": 19.4,
+   "latency_ms": {
+    "p50": 133.6,
+    "p95": 144.2,
+    "min": 120.9,
+    "max": 144.2
+   },
+   "tokens": {
+    "speech_in": 1073,
+    "speech_out": 2624,
+    "text_in": 2221,
+    "text_out": 740
+   },
+   "est_cost_usd": 0.037475,
+   "latency_basis": "model_end_of_turn",
+   "client_v2v_s": [
+    1.094,
+    1.032,
+    1.013,
+    1.312,
+    0.994,
+    0.993,
+    0.934,
+    1.093,
+    1.012,
+    1.153,
+    0.971,
+    1.352,
+    1.188,
+    5.673,
+    1.453
+   ],
+   "offer_rtt_s": 6.16
+  },
+  {
+   "run": "quality2",
+   "call_id": "SmallWebRTCConnection#16-56d396d7c3b144ffb3aad966fa1cab28",
+   "duration_s": 63.3,
+   "turns": 15,
+   "interruptions": 0,
+   "user_talk_s": 7.9,
+   "agent_talk_s": 21.0,
+   "latency_ms": {
+    "p50": 133.3,
+    "p95": 168.6,
+    "min": 126.9,
+    "max": 168.6
+   },
+   "tokens": {
+    "speech_in": 1076,
+    "speech_out": 2666,
+    "text_in": 2222,
+    "text_out": 707
+   },
+   "est_cost_usd": 0.037898,
+   "latency_basis": "model_end_of_turn",
+   "client_v2v_s": [
+    1.192,
+    1.108,
+    1.091,
+    1.466,
+    1.269,
+    1.068,
+    1.167,
+    1.326,
+    1.269,
+    1.488,
+    1.088,
+    1.11,
+    1.048,
+    1.448,
+    1.248
+   ],
+   "offer_rtt_s": 6.29
   }
- },
- {
-  "run": "interrupt4",
-  "call_id": "SmallWebRTCConnection#14-58098eb758ab460f904701179c8a3e5c",
-  "duration_s": 14.3,
-  "turns": 2,
-  "interruptions": 0,
-  "user_talk_s": 1.0,
-  "agent_talk_s": 3.8,
-  "latency_ms": {
-   "p50": 126.9,
-   "p95": 127.1,
-   "min": 126.9,
-   "max": 127.1
-  },
-  "tokens": {
-   "speech_in": 251,
-   "speech_out": 512,
-   "text_in": 2138,
-   "text_out": 128
-  },
-  "est_cost_usd": 0.007955,
-  "latency_basis": "model_end_of_turn",
-  "interrupt": {
-   "agent_answer_start_s": 3.841,
-   "interrupt_started_s": 6.341,
-   "interrupt_ended_s": 8.213,
-   "interrupt_frames_sent": 93,
-   "agent_audio_last_loud_s": 10.041,
-   "interrupt_end_to_agent_stop_s": 1.828
-  }
- },
- {
-  "run": "latency1",
-  "call_id": "SmallWebRTCConnection#2-a2d5c18d1e9d4361a688db4406ecbfea",
-  "duration_s": 42.4,
-  "turns": 10,
-  "interruptions": 0,
-  "user_talk_s": 5.2,
-  "agent_talk_s": 13.4,
-  "latency_ms": {
-   "p50": 132.5,
-   "p95": 166.1,
-   "min": 129.7,
-   "max": 166.1
-  },
-  "tokens": {
-   "speech_in": 746,
-   "speech_out": 2135,
-   "text_in": 2192,
-   "text_out": 526
-  },
-  "est_cost_usd": 0.030028,
-  "latency_basis": "model_end_of_turn",
-  "client_v2v_s": [
-   1.121,
-   1.043,
-   1.103,
-   1.201,
-   1.056,
-   0.862,
-   0.861,
-   1.162,
-   1.044,
-   1.162
-  ],
-  "offer_rtt_s": 5.99
- },
- {
-  "run": "quality1",
-  "call_id": "SmallWebRTCConnection#15-60d494159b5a4b99a3e2ea18a8b95047",
-  "duration_s": 63.5,
-  "turns": 14,
-  "interruptions": 0,
-  "user_talk_s": 10.2,
-  "agent_talk_s": 19.4,
-  "latency_ms": {
-   "p50": 133.6,
-   "p95": 144.2,
-   "min": 120.9,
-   "max": 144.2
-  },
-  "tokens": {
-   "speech_in": 1073,
-   "speech_out": 2624,
-   "text_in": 2221,
-   "text_out": 740
-  },
-  "est_cost_usd": 0.037475,
-  "latency_basis": "model_end_of_turn",
-  "client_v2v_s": [
-   1.094,
-   1.032,
-   1.013,
-   1.312,
-   0.994,
-   0.993,
-   0.934,
-   1.093,
-   1.012,
-   1.153,
-   0.971,
-   1.352,
-   1.188,
-   5.673,
-   1.453
-  ],
-  "offer_rtt_s": 6.16
- },
- {
-  "run": "quality2",
-  "call_id": "SmallWebRTCConnection#16-56d396d7c3b144ffb3aad966fa1cab28",
-  "duration_s": 63.3,
-  "turns": 15,
-  "interruptions": 0,
-  "user_talk_s": 7.9,
-  "agent_talk_s": 21.0,
-  "latency_ms": {
-   "p50": 133.3,
-   "p95": 168.6,
-   "min": 126.9,
-   "max": 168.6
-  },
-  "tokens": {
-   "speech_in": 1076,
-   "speech_out": 2666,
-   "text_in": 2222,
-   "text_out": 707
-  },
-  "est_cost_usd": 0.037898,
-  "latency_basis": "model_end_of_turn",
-  "client_v2v_s": [
-   1.192,
-   1.108,
-   1.091,
-   1.466,
-   1.269,
-   1.068,
-   1.167,
-   1.326,
-   1.269,
-   1.488,
-   1.088,
-   1.11,
-   1.048,
-   1.448,
-   1.248
-  ],
-  "offer_rtt_s": 6.29
+ ],
+ "cold_start": {
+  "attempts": 3,
+  "cycles": [
+   {
+    "cycle": 1,
+    "stages": [
+     {
+      "stage": "provisioning",
+      "dur_s": 58.7
+     },
+     {
+      "stage": "securing",
+      "dur_s": 20.0
+     }
+    ],
+    "total_s": 81.2
+   },
+   {
+    "cycle": 2,
+    "stages": [
+     {
+      "stage": "provisioning",
+      "dur_s": 38.9
+     },
+     {
+      "stage": "securing",
+      "dur_s": 3.2
+     }
+    ],
+    "total_s": 44.5
+   },
+   {
+    "cycle": 3,
+    "stages": [
+     {
+      "stage": "provisioning",
+      "dur_s": 48.6
+     },
+     {
+      "stage": "securing",
+      "dur_s": 3.3
+     }
+    ],
+    "total_s": 54.3
+   }
+  ]
  }
-]
+}
 ```

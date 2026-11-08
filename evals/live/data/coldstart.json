@@ -1,0 +1,47 @@
+{
+  "attempts": 3,
+  "cycles": [
+    {
+      "cycle": 1,
+      "stages": [
+        {
+          "stage": "provisioning",
+          "dur_s": 58.7
+        },
+        {
+          "stage": "securing",
+          "dur_s": 20.0
+        }
+      ],
+      "total_s": 81.2
+    },
+    {
+      "cycle": 2,
+      "stages": [
+        {
+          "stage": "provisioning",
+          "dur_s": 38.9
+        },
+        {
+          "stage": "securing",
+          "dur_s": 3.2
+        }
+      ],
+      "total_s": 44.5
+    },
+    {
+      "cycle": 3,
+      "stages": [
+        {
+          "stage": "provisioning",
+          "dur_s": 48.6
+        },
+        {
+          "stage": "securing",
+          "dur_s": 3.3
+        }
+      ],
+      "total_s": 54.3
+    }
+  ]
+}
