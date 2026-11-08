@@ -1,0 +1,7 @@
+{
+  "calls": 1000,
+  "max_concurrent": 1000,
+  "turns_per_call": 6,
+  "slo_turn_p95_ms": 2500,
+  "notes": "Production-fleet config. On the 8GB laptop this fails honestly at admission — that is the intended behavior."
+}
