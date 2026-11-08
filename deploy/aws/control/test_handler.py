@@ -1,8 +1,12 @@
-"""Stubbed checks for control/handler.py: start, status, idle-stop rules."""
+"""Stubbed checks for control/handler.py: start, status, idle-stop rules, admin summary."""
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
+
+import pytest
 
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
@@ -147,3 +151,176 @@ def test_sweep_noop_when_already_stopped(monkeypatch):
     install(monkeypatch, ecs)
     assert handler.sweep()["reason"] == "stopped"
     assert ecs.updates == []
+
+
+# ---------- /admin/summary ----------
+
+TOKEN = "a" * 32
+
+
+class FakeSM:
+    def __init__(self, secret=TOKEN):
+        self.secret = secret
+
+    def get_secret_value(self, SecretId):
+        return {"SecretString": self.secret}
+
+
+class FakeTable:
+    """Two scan pages: the first returns LastEvaluatedKey, so pagination is exercised."""
+
+    def __init__(self):
+        def item(call_id, started, duration_s, cost, per_turn):
+            return {
+                "call_id": call_id,
+                "started_at": started,
+                "duration_s": None if duration_s is None else Decimal(duration_s),
+                "turns": Decimal(len(per_turn)),
+                "interruptions": Decimal(0),
+                "greeting_latency_ms": Decimal(120),
+                "latency_ms": {
+                    "p50": Decimal(200),
+                    "p95": Decimal(300),
+                    "min": Decimal(100),
+                    "max": Decimal(300),
+                },
+                "per_turn_ms": [Decimal(x) for x in per_turn],
+                "user_talk_s": Decimal("10"),
+                "agent_talk_s": Decimal("12"),
+                "tokens": {"input": Decimal(500), "output": Decimal(200)},
+                "est_cost_usd": None if cost is None else Decimal(cost),
+                "model": "amazon.nova-2-sonic-v1:0",
+                "region": "us-east-1",
+                "measured_at": started,
+                "ttl": Decimal(1900000000),
+            }
+
+        self.pages = [
+            {
+                "Items": [item("a", "2026-11-07T10:00:00Z", "150", "0.10", [100, 300])],
+                "LastEvaluatedKey": {"call_id": "a"},
+            },
+            {
+                "Items": [
+                    item("b", "2026-11-08T09:00:00Z", "90", "0.05", [200]),
+                    # Missing duration and cost: skipped in minutes, treated as 0 in cost.
+                    item("c", "2026-11-06T08:00:00Z", None, None, []),
+                ]
+            },
+        ]
+        self.scans = 0
+
+    def scan(self, **kwargs):
+        page = self.pages[self.scans]
+        self.scans += 1
+        return page
+
+
+class FakeCE:
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.calls = 0
+
+    def get_cost_and_usage(self, **kwargs):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("Cost Explorer is not enabled for this account")
+        if kwargs.get("GroupBy"):
+
+            def group(service, amount):
+                return {"Keys": [service], "Metrics": {"UnblendedCost": {"Amount": amount}}}
+
+            return {
+                "ResultsByTime": [
+                    {"Groups": [group("Amazon EC2", "1.25"), group("Amazon S3", "0.5")]}
+                ]
+            }
+        return {
+            "ResultsByTime": [
+                {
+                    "TimePeriod": {"Start": "2026-11-07", "End": "2026-11-08"},
+                    "Total": {"UnblendedCost": {"Amount": "1.75"}},
+                }
+            ]
+        }
+
+
+@pytest.fixture
+def admin(monkeypatch):
+    install(monkeypatch, FakeECS(desired=0))  # backend reports "stopped", no DNS touched
+    monkeypatch.setattr(handler, "_admin_token", None)
+    monkeypatch.setattr(handler, "_ce_cache", None)
+    monkeypatch.setattr(handler, "sm", FakeSM())
+    monkeypatch.setattr(handler, "calls_table", FakeTable())
+    ce = FakeCE()
+    monkeypatch.setattr(handler, "ce", ce)
+    return SimpleNamespace(ce=ce)
+
+
+def admin_event(auth=None):
+    headers = {} if auth is None else {"authorization": auth}
+    return {
+        "requestContext": {"http": {"method": "GET"}},
+        "rawPath": "/demo/admin/summary",
+        "headers": headers,
+    }
+
+
+def test_admin_401_when_token_missing(admin):
+    out = handler.handler(admin_event(), None)
+    assert out["statusCode"] == 401
+    assert json.loads(out["body"]) == {"error": "unauthorized"}
+    assert admin.ce.calls == 0
+
+
+def test_admin_401_when_token_wrong(admin):
+    out = handler.handler(admin_event("Bearer " + "b" * 32), None)
+    assert out["statusCode"] == 401
+
+
+def test_admin_401_when_bearer_empty(admin):
+    assert handler.handler(admin_event("Bearer "), None)["statusCode"] == 401
+
+
+def test_admin_200_shape_with_stubbed_dynamo_and_ce(admin):
+    out = handler.handler(admin_event(f"Bearer {TOKEN}"), None)
+    assert out["statusCode"] == 200
+    body = json.loads(out["body"])  # also proves Decimals were converted
+
+    assert body["backend"] == {"state": "stopped", "url": None}
+    assert body["totals"] == {
+        "calls": 3,
+        "minutes": 4.0,
+        "est_cost_usd": 0.15,
+        "p50_ms": 200.0,
+        "p95_ms": 300.0,
+    }
+    assert [c["call_id"] for c in body["calls"]] == ["b", "a", "c"]  # newest first
+    assert body["calls"][0]["per_turn_ms"] == [200.0]
+
+    cost = body["aws_cost"]
+    assert cost["source"] == "cost-explorer"
+    assert cost["scope"] == "account"
+    assert cost["error"] is None
+    assert cost["month_to_date_usd"] == 1.75
+    assert cost["by_service"][0] == {"service": "Amazon EC2", "usd": 1.25}
+    assert cost["daily"] == [{"date": "2026-11-07", "usd": 1.75}]
+
+
+def test_admin_cost_failure_is_unavailable_not_fatal(monkeypatch, admin):
+    monkeypatch.setattr(handler, "ce", FakeCE(fail=True))
+    out = handler.handler(admin_event(f"Bearer {TOKEN}"), None)
+    assert out["statusCode"] == 200
+    body = json.loads(out["body"])
+    assert body["aws_cost"]["source"] == "unavailable"
+    assert "not enabled" in body["aws_cost"]["error"]
+    assert body["aws_cost"]["month_to_date_usd"] is None
+    assert body["totals"]["calls"] == 3
+
+
+def test_admin_cost_cached_for_six_hours(admin):
+    handler.handler(admin_event(f"Bearer {TOKEN}"), None)
+    first = admin.ce.calls  # one DAILY + one MONTHLY call
+    handler.handler(admin_event(f"Bearer {TOKEN}"), None)
+    assert first == 2
+    assert admin.ce.calls == 2  # second request served from cache

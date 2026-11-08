@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { gsap } from "gsap";
 import { track } from "@vercel/analytics";
-import { Orb, type OrbPhase } from "@/components/Orb";
+import { Orb, type OrbState } from "@/components/Orb";
+import { CallReport } from "@/components/CallReport";
 import { signal } from "@/lib/signal";
+import type { CallReportData } from "@/lib/report";
 
 // Public base URL of the control API. Inlined at build time; unset = calls off.
 const CONTROL_URL = process.env.NEXT_PUBLIC_DEMO_CONTROL_URL?.replace(/\/+$/, "");
@@ -12,9 +14,18 @@ const POLL_MS = 3000;
 const WAKE_TIMEOUT_MS = 150_000;
 const ICE_WAIT_MS = 3000;
 const MAX_CALL_S = 300;
+const REPORT_POLL_MS = 1000;
+const REPORT_MAX_MS = 15_000;
+const TALK_HOLD_FRAMES = 12; // about 200 ms at 60 fps before the orb switches talker
 
 type Backend = { state: "stopped" | "starting" | "ready"; url: string | null };
-type Phase = OrbPhase;
+type Phase = "idle" | "waking" | "connecting" | "live" | "error";
+type Talker = "listening" | "speaking";
+type ReportState =
+  | { kind: "none" }
+  | { kind: "pending" }
+  | { kind: "unavailable" }
+  | { kind: "ready"; data: CallReportData };
 
 /** One start-to-hangup attempt. Teardown is driven entirely from here. */
 type Session = {
@@ -25,8 +36,10 @@ type Session = {
   pc?: RTCPeerConnection;
   stream?: MediaStream;
   audioCtx?: AudioContext;
-  meters: AnalyserNode[];
+  mic?: AnalyserNode;
+  agentMeters: AnalyserNode[];
   tick?: () => void;
+  report?: { base: string; pcId: string };
 };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -70,6 +83,8 @@ function teardown(s: Session) {
   s.timers.forEach((t) => clearInterval(t));
   if (s.tick) gsap.ticker.remove(s.tick);
   signal.level = 0;
+  signal.mic = 0;
+  signal.agent = 0;
   signal.live = false;
   s.pc?.close();
   s.stream?.getTracks().forEach((t) => t.stop());
@@ -82,10 +97,15 @@ const fmt = (s: number) =>
 /** The orb: one click starts a WebRTC call with the scale-to-zero AWS agent, one click ends it. */
 export function LiveDemo() {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const orbRef = useRef<HTMLButtonElement>(null);
   const sessionRef = useRef<Session | null>(null);
+  const reportRun = useRef(0); // bumped to cancel an in-flight report poll
   const [phase, setPhase] = useState<Phase>("idle");
+  const [talker, setTalker] = useState<Talker>("listening");
+  const [ended, setEnded] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState("");
+  const [reportState, setReportState] = useState<ReportState>({ kind: "none" });
 
   // Page load: count the visit, then wake the agent so it is often ready before the first click.
   useEffect(() => {
@@ -97,14 +117,43 @@ export function LiveDemo() {
     }
   }, []);
 
-  // Stop everything if the page unmounts mid-call.
+  // Stop everything if the page unmounts mid-call or mid-report.
   useEffect(() => {
+    const runs = reportRun;
     return () => {
+      runs.current++;
       const s = sessionRef.current;
       sessionRef.current = null;
       if (s) teardown(s);
     };
   }, []);
+
+  /** Poll the server report until it is ready (202 = not yet), for up to REPORT_MAX_MS. */
+  const startReport = async (base: string, pcId: string) => {
+    const run = ++reportRun.current;
+    const alive = () => run === reportRun.current;
+    setReportState({ kind: "pending" });
+    const t0 = Date.now();
+    while (Date.now() - t0 < REPORT_MAX_MS) {
+      const res = await fetch(`${base}/api/demo/report/${encodeURIComponent(pcId)}`, {
+        cache: "no-store",
+      }).catch(() => null);
+      if (!alive()) return;
+      if (res?.ok) {
+        const data: CallReportData | null = await res.json().catch(() => null);
+        if (!alive()) return;
+        if (data) {
+          setReportState({ kind: "ready", data });
+          return;
+        }
+        break;
+      }
+      if (res && res.status !== 202) break;
+      await sleep(REPORT_POLL_MS);
+      if (!alive()) return;
+    }
+    if (alive()) setReportState({ kind: "unavailable" });
+  };
 
   const finish = (next: "idle" | "error", msg: string) => {
     const s = sessionRef.current;
@@ -116,6 +165,10 @@ export function LiveDemo() {
     if (audioRef.current) audioRef.current.srcObject = null;
     setPhase(next);
     setMessage(msg);
+    if (s?.live) {
+      setEnded(true);
+      if (s.report) void startReport(s.report.base, s.report.pcId);
+    }
   };
 
   const connect = async (s: Session, base: string) => {
@@ -137,12 +190,12 @@ export function LiveDemo() {
       void a.play().catch(() => {
         // Autoplay blocked: the user can still press play on the control.
       });
-      // Agent audio feeds the signal line through the same AudioContext as the mic.
+      // Agent audio feeds the signal through the same AudioContext as the mic.
       if (s.audioCtx) {
         const an = s.audioCtx.createAnalyser();
         an.fftSize = 512;
         s.audioCtx.createMediaStreamSource(remote).connect(an);
-        s.meters.push(an);
+        s.agentMeters.push(an);
       }
     };
     pc.onconnectionstatechange = () => {
@@ -166,27 +219,46 @@ export function LiveDemo() {
       throw new Error("The demo is busy right now. Try again in a minute.");
     }
     if (!res.ok) throw new Error(`The agent rejected the connection (HTTP ${res.status}).`);
-    const answer = await res.json();
+    const answer: { sdp: string; pc_id?: string } = await res.json();
     if (s.cancelled) return;
+    if (answer.pc_id) s.report = { base, pcId: String(answer.pc_id) };
     await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
 
-    // Live: reset the session timer and drive the orb from mic and agent audio.
+    // Live: reset the session timer and drive the orb from mic and agent audio separately.
     s.live = true;
     s.t0 = Date.now();
     if (s.audioCtx) {
       const mic = s.audioCtx.createAnalyser();
       mic.fftSize = 512;
       s.audioCtx.createMediaStreamSource(stream).connect(mic);
-      s.meters.push(mic);
+      s.mic = mic;
     }
+    let current: Talker = "listening";
+    let cand: Talker | null = null;
+    let candFrames = 0;
     s.tick = () => {
-      let level = 0;
-      for (const m of s.meters) level = Math.max(level, rms(m));
-      signal.level = level;
+      const mic = s.mic ? rms(s.mic) : 0;
+      let agent = 0;
+      for (const m of s.agentMeters) agent = Math.max(agent, rms(m));
+      signal.mic = mic;
+      signal.agent = agent;
+      signal.level = Math.max(mic, agent);
       signal.live = true;
+      // The orb switches talker only after the other side has held the floor briefly.
+      const want: Talker = agent > mic ? "speaking" : "listening";
+      if (want === current) cand = null;
+      else if (want !== cand) {
+        cand = want;
+        candFrames = 0;
+      } else if (++candFrames >= TALK_HOLD_FRAMES) {
+        current = want;
+        cand = null;
+        setTalker(want);
+      }
     };
     gsap.ticker.add(s.tick);
     setElapsed(0);
+    setTalker("listening");
     setPhase("live");
     track("call_started");
   };
@@ -199,10 +271,13 @@ export function LiveDemo() {
       live: false,
       t0: Date.now(),
       timers: [],
-      meters: [],
+      agentMeters: [],
       audioCtx: new AudioContext(),
     };
     sessionRef.current = s;
+    reportRun.current++;
+    setReportState({ kind: "none" });
+    setEnded(false);
     setPhase("waking");
     setMessage("");
     setElapsed(0);
@@ -220,9 +295,7 @@ export function LiveDemo() {
       let b = await fetchBackend("start");
       while (b.state !== "ready" || !b.url) {
         if (Date.now() - s.t0 > WAKE_TIMEOUT_MS) {
-          throw new Error(
-            "The agent did not wake up in time. Try again later.",
-          );
+          throw new Error("The agent did not wake up in time. Try again later.");
         }
         await sleep(POLL_MS);
         if (s.cancelled) return;
@@ -239,6 +312,15 @@ export function LiveDemo() {
 
   const hangUp = () => finish("idle", "Call ended. Thanks for listening.");
 
+  /** Back to the idle orb; the report goes away. */
+  const callAgain = () => {
+    reportRun.current++;
+    setReportState({ kind: "none" });
+    setEnded(false);
+    setMessage("");
+    orbRef.current?.focus();
+  };
+
   const busy = phase === "waking" || phase === "connecting";
   const orbLabel = !CONTROL_URL
     ? "Live calls are off"
@@ -248,6 +330,18 @@ export function LiveDemo() {
         ? "Cancel"
         : "Start call";
   const onOrb = () => (busy || phase === "live" ? hangUp() : startCall());
+
+  const orbState: OrbState = !CONTROL_URL
+    ? "disabled"
+    : phase === "waking"
+      ? "waking"
+      : phase === "connecting"
+        ? "connecting"
+        : phase === "live"
+          ? talker
+          : phase === "error" || ended
+            ? "ended"
+            : "idle";
 
   // The clock ticks every second; it is aria-hidden so the live region does not chatter.
   let status: ReactNode;
@@ -275,11 +369,24 @@ export function LiveDemo() {
   }
 
   return (
-    <div className="flex flex-col items-center gap-6">
-      <Orb phase={phase} enabled={!!CONTROL_URL} label={orbLabel} onClick={onOrb} />
+    <div className="flex w-full flex-col items-center gap-6">
+      <Orb
+        state={orbState}
+        enabled={!!CONTROL_URL}
+        label={orbLabel}
+        onClick={onOrb}
+        buttonRef={orbRef}
+      />
       <p role="status" aria-live="polite" className="mono min-h-[3rem] max-w-[52ch] text-center text-sm text-muted">
         {status}
       </p>
+      {reportState.kind === "pending" && <p className="mono text-sm text-muted">Preparing the call report…</p>}
+      {reportState.kind === "unavailable" && (
+        <p className="mono max-w-[52ch] text-center text-sm text-muted">
+          The call report was not ready in time. The call itself is not affected.
+        </p>
+      )}
+      {reportState.kind === "ready" && <CallReport report={reportState.data} onAgain={callAgain} />}
       {/* Remote agent audio; autoplay is triggered from a user gesture. */}
       <audio ref={audioRef} autoPlay />
     </div>
