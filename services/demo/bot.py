@@ -114,6 +114,17 @@ search. Model providers, Amazon Bedrock or OpenRouter, sit behind one interface 
 be swapped without touching the rest. Each call has a single state machine; when the caller \
 interrupts, the agent stops at once and drops its unfinished reply. Extra calls get a quick \
 busy signal before any model cost is spent.
+Competitors and what makes it different: there are hosted voice agent platforms like Vapi, \
+Retell, Bland and Synthflow, and model services like OpenAI Realtime, Deepgram and \
+AssemblyAI. They are faster to start with and some advertise lower latency, around eight \
+hundred milliseconds voice to voice for Retell by its own benchmark. What sets this project \
+apart: you own the whole speech layer and can run it yourself, even fully inside the EU; \
+every quality number comes with a command anyone can rerun, instead of a vendor dashboard; \
+speech accuracy is tested on real phone-quality audio, not clean studio recordings; latency \
+is broken down per stage of each turn, not just one average; and interruption handling and \
+cost limits are open and tested, not a black box. Be honest: it does not yet claim to beat \
+them on speed or accuracy; its edge today is ownership, transparency and how it is \
+evaluated. Give the one or two points that fit the question, not the whole list.
 This live demo: the browser connects straight to this agent, which runs Amazon Nova 2 \
 Sonic, a speech to speech model, on one small cloud server. The task scales to zero when nobody \
 calls, so the first call takes about a minute to wake it. Calls are capped at five minutes \
