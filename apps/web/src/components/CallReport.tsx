@@ -10,8 +10,8 @@ import {
 
 const SLOW_MS = 2000;
 
-/** Post-call report: headline latency, three stats, a table, and one bar per turn. */
-export function CallReport({ report, onAgain }: { report: CallReportData; onAgain: () => void }) {
+/** Post-call report: headline latency, three stats, a table, and one bar per turn. Pass onAgain to show "Call again". */
+export function CallReport({ report, onAgain }: { report: CallReportData; onAgain?: () => void }) {
   const lat = report.latency_ms;
   const p50 = lat?.p50 ?? null;
   const turns = report.per_turn_ms ?? [];
@@ -42,7 +42,7 @@ export function CallReport({ report, onAgain }: { report: CallReportData; onAgai
 
       <div className="mt-3">
         <p className="figure num text-[length:var(--t-xl)] text-ink">{p50 == null ? "—" : fmtSec(p50)}</p>
-        <p className="mt-1 text-sm text-muted">median response time</p>
+        <p className="mt-1 text-sm text-muted">median reply after you finish</p>
         {p50 != null && <p className="mt-1 text-[length:var(--t-m)] text-ink">{verdict(p50)}</p>}
       </div>
 
@@ -113,12 +113,16 @@ export function CallReport({ report, onAgain }: { report: CallReportData; onAgai
       )}
 
       <p className="mt-6 text-xs text-muted">
-        Measured on the server from end of your speech to first agent audio. Network adds a little more.
+        Measured on the server from when the model decided you had finished speaking to its first audio. The
+        model&apos;s own wait to be sure you stopped (often half a second to a second) and network time are not
+        included.
       </p>
 
-      <button type="button" onClick={onAgain} className="key mt-6">
-        Call again
-      </button>
+      {onAgain && (
+        <button type="button" onClick={onAgain} className="key mt-6">
+          Call again
+        </button>
+      )}
     </section>
   );
 }

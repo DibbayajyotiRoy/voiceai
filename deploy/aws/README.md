@@ -112,6 +112,26 @@ Cost notes:
 - The admin token is cached in the Lambda. After rotating the secret, wait for a Lambda cold start
   (or redeploy) before the new value is accepted.
 
+## Traffic events and public reports
+
+- `POST $CONTROL/track` stores page views, call starts and completions, and share or open events
+  in DynamoDB `voiceai-demo-events` (rows expire after 180 days). It needs the header
+  `X-Track-Secret`, and it returns 401 without the right value.
+- `GET $CONTROL/report/{share_id}` is public and cached for an hour. It serves one finished call by
+  the hex suffix of its `call_id` (GSI `share_id-index` on `voiceai-demo-calls`).
+- `/admin/summary` adds a `traffic` block: page views, unique visitors, calls, shares by channel,
+  UTM sources, per-country counts and the last 500 located events. Raw IP addresses are never
+  stored.
+
+Read the track secret:
+
+```bash
+aws secretsmanager get-secret-value --secret-id voiceai/track-secret --query SecretString --output text --region us-east-1
+```
+
+Set the same value as the Vercel server environment variable `TRACK_SECRET` (server-side only, never
+`NEXT_PUBLIC_*`). Without it the frontend cannot send events.
+
 ## Teardown
 
 ```bash

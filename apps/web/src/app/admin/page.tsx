@@ -1,14 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import {
-  fmtDateTime,
-  fmtDuration,
-  fmtMs,
-  fmtSec,
-  fmtUsd,
-  type AdminSummary,
-} from "@/lib/report";
+import { fmtDateTime, fmtDuration, fmtMs, fmtSec, fmtUsd, type AdminSummary } from "@/lib/report";
+import { TrafficSection } from "./traffic";
+import type { AdminData } from "./types";
 
 const CONTROL_URL = process.env.NEXT_PUBLIC_DEMO_CONTROL_URL?.replace(/\/+$/, "");
 const TOKEN_KEY = "voiceai-admin-token";
@@ -35,7 +30,7 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [data, setData] = useState<AdminSummary | null>(null);
+  const [data, setData] = useState<AdminData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -182,7 +177,7 @@ export default function AdminPage() {
   );
 }
 
-function Dashboard({ data }: { data: AdminSummary }) {
+function Dashboard({ data }: { data: AdminData }) {
   const { totals, aws_cost: aws } = data;
   const tiles: { label: string; value: string; note?: string }[] = [
     { label: "Calls", value: String(totals.calls) },
@@ -207,6 +202,8 @@ function Dashboard({ data }: { data: AdminSummary }) {
           </div>
         ))}
       </section>
+
+      <TrafficSection traffic={data.traffic} />
 
       <section aria-labelledby="daily-title" className="space-y-3">
         <h2 id="daily-title" className="phase">

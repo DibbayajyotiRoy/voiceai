@@ -140,8 +140,30 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: call_id, AttributeType: S }
+        - { AttributeName: share_id, AttributeType: S }
       KeySchema:
         - { AttributeName: call_id, KeyType: HASH }
+      # Public /report/{share_id} lookup (share_id = hex suffix of call_id).
+      GlobalSecondaryIndexes:
+        - IndexName: share_id-index
+          KeySchema:
+            - { AttributeName: share_id, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # Page views, call starts/completions and share/open events from the site (POST /track).
+  # Written and scanned by the control Lambda only. Rows expire after 180 days.
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: voiceai-demo-events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: event_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: event_id, KeyType: HASH }
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
@@ -155,6 +177,17 @@ Resources:
       Description: Bearer token for the demo control Lambda /admin/summary route
       GenerateSecretString:
         PasswordLength: 32
+        ExcludePunctuation: true
+
+  # Shared secret the frontend sends as X-Track-Secret on POST /track. Read it with:
+  # aws secretsmanager get-secret-value --secret-id voiceai/track-secret --query SecretString --output text
+  TrackSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: voiceai/track-secret
+      Description: Shared secret for POST /track on the demo control Lambda (set as Vercel TRACK_SECRET)
+      GenerateSecretString:
+        PasswordLength: 40
         ExcludePunctuation: true
 
   EcrRepository:
@@ -250,6 +283,15 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:Scan, dynamodb:Query]
                 Resource: !GetAtt CallsTable.Arn
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub ${CallsTable.Arn}/index/share_id-index
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:Scan]
+                Resource: !GetAtt EventsTable.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:voiceai/track-secret-*
               - Effect: Allow
                 # Cost Explorer does not support resource-level permissions.
                 Action: ce:GetCostAndUsage
@@ -364,7 +406,9 @@ Resources:
           VERCEL_SECRET_ID: voiceai/vercel-token
           VERCEL_TEAM_ID: !Ref VercelTeamId
           ADMIN_TOKEN_SECRET: voiceai/admin-token
+          TRACK_SECRET_NAME: voiceai/track-secret
           DEMO_CALLS_TABLE: !Ref CallsTable
+          DEMO_EVENTS_TABLE: !Ref EventsTable
 
   ControlUrl:
     Type: AWS::Lambda::Url
@@ -374,7 +418,7 @@ Resources:
       Cors:
         AllowOrigins: [https://dibbayajyoti.com, https://voiceai-presentation.vercel.app, http://localhost:3000]
         AllowMethods: [GET, POST]
-        AllowHeaders: [Authorization, Content-Type]
+        AllowHeaders: [Authorization, Content-Type, X-Track-Secret]
         MaxAge: 300
 
   ControlUrlPermission:
@@ -425,3 +469,6 @@ Outputs:
   AdminTokenSecretName:
     Description: Read the admin bearer token with aws secretsmanager get-secret-value (see README)
     Value: voiceai/admin-token
+  TrackSecretName:
+    Description: Read the X-Track-Secret value with aws secretsmanager get-secret-value (set as Vercel TRACK_SECRET)
+    Value: voiceai/track-secret

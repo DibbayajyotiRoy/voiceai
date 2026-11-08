@@ -16,6 +16,8 @@ export type CallReportData = {
   model: string;
   region: string;
   measured_at: string;
+  share_id?: string | null;
+  latency_basis?: string;
 };
 
 export type AdminSummary = {

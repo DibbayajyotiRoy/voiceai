@@ -131,6 +131,8 @@ class CallMetrics:
         tokens = dict(self._usage) if self._usage is not None else None
         return {
             "call_id": self.call_id,
+            # call_id is "<transport>#<n>-<32 hex>"; the hex suffix is the public share id.
+            "share_id": self.call_id.rsplit("-", 1)[-1] if "-" in self.call_id else None,
             "started_at": self.started_at,
             "duration_s": round(end_ts - self.start_ts, 1),
             "turns": self.turns,
@@ -144,6 +146,7 @@ class CallMetrics:
             "est_cost_usd": estimate_cost_usd(tokens),
             "model": self.model,
             "region": self.region,
+            "latency_basis": "model_end_of_turn",
             "measured_at": "server",
         }
 
@@ -192,6 +195,8 @@ async def persist_report(report: dict[str, Any], *, region: str, now: float | No
         return
     ttl = int((time.time() if now is None else now) + TTL_SECONDS)
     item = to_dynamo({**report, "ttl": ttl})
+    if item.get("share_id") is None:
+        item.pop("share_id", None)  # DynamoDB rejects a NULL value for a GSI key attribute
     try:
         await asyncio.to_thread(_put_item, table_name, region, item)
     except Exception:

@@ -4,10 +4,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { gsap } from "gsap";
 import { track } from "@vercel/analytics";
 import { Orb, type OrbState } from "@/components/Orb";
-import { CallReport } from "@/components/CallReport";
+import { ReportDialog } from "@/components/ReportDialog";
 import { WakeProgress } from "@/components/WakeProgress";
 import { signal } from "@/lib/signal";
 import type { CallReportData } from "@/lib/report";
+import { trackEvent } from "@/lib/track";
 
 // Public base URL of the control API. Inlined at build time; unset = calls off.
 const CONTROL_URL = process.env.NEXT_PUBLIC_DEMO_CONTROL_URL?.replace(/\/+$/, "");
@@ -133,11 +134,13 @@ export function LiveDemo() {
   const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState("");
   const [reportState, setReportState] = useState<ReportState>({ kind: "none" });
+  const [reportOpen, setReportOpen] = useState(false);
   const [wake, setWake] = useState<WakeInfo>({ stage: null, sinceS: null });
 
   // Page load: count the visit, then wake the agent so it is often ready before the first click.
   useEffect(() => {
     track("presentation_started");
+    trackEvent("page_view");
     if (CONTROL_URL) {
       fetchBackend("start")
         .then((b) => setWake(wakeFrom(b)))
@@ -175,6 +178,8 @@ export function LiveDemo() {
         if (!alive()) return;
         if (data?.call_id) {
           setReportState({ kind: "ready", data });
+          setReportOpen(true);
+          trackEvent("call_completed", { share_id: data.share_id ?? undefined });
           return;
         }
         break;
@@ -301,6 +306,7 @@ export function LiveDemo() {
     setTalker("listening");
     setPhase("live");
     track("call_started");
+    trackEvent("call_started");
   };
 
   const startCall = async () => {
@@ -317,6 +323,7 @@ export function LiveDemo() {
     sessionRef.current = s;
     reportRun.current++;
     setReportState({ kind: "none" });
+    setReportOpen(false);
     setEnded(false);
     setPhase("waking");
     setWake({ stage: null, sinceS: null });
@@ -359,6 +366,7 @@ export function LiveDemo() {
   const callAgain = () => {
     reportRun.current++;
     setReportState({ kind: "none" });
+    setReportOpen(false);
     setEnded(false);
     setMessage("");
     orbRef.current?.focus();
@@ -426,7 +434,24 @@ export function LiveDemo() {
           The call report was not ready in time. The call itself is not affected.
         </p>
       )}
-      {reportState.kind === "ready" && <CallReport report={reportState.data} onAgain={callAgain} />}
+      {reportState.kind === "ready" && (
+        <>
+          <ReportDialog
+            report={reportState.data}
+            open={reportOpen}
+            onAgain={callAgain}
+            onClose={() => {
+              setReportOpen(false);
+              orbRef.current?.focus();
+            }}
+          />
+          {!reportOpen && (
+            <button type="button" className="key" onClick={() => setReportOpen(true)}>
+              View report
+            </button>
+          )}
+        </>
+      )}
       {/* Remote agent audio; autoplay is triggered from a user gesture. */}
       <audio ref={audioRef} autoPlay />
     </div>

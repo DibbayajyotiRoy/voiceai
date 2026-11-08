@@ -112,6 +112,7 @@ def test_report_has_exact_schema_keys() -> None:
     r = _call().report(end_ts=1.0)
     assert set(r) == {
         "call_id",
+        "share_id",
         "started_at",
         "duration_s",
         "turns",
@@ -125,8 +126,21 @@ def test_report_has_exact_schema_keys() -> None:
         "est_cost_usd",
         "model",
         "region",
+        "latency_basis",
         "measured_at",
     }
+
+
+def test_share_id_is_hex_suffix_of_call_id() -> None:
+    cid = "SmallWebRTCConnection#0-86fdbaf79dd94261b5ef4faf1ef5a854"
+    r = CallMetrics(cid, "t", 0.0, "m", "r").report(end_ts=1.0)
+    assert r["share_id"] == "86fdbaf79dd94261b5ef4faf1ef5a854"
+    assert r["latency_basis"] == "model_end_of_turn"
+
+
+def test_share_id_null_without_dash() -> None:
+    r = CallMetrics("nodash", "t", 0.0, "m", "r").report(end_ts=1.0)
+    assert r["share_id"] is None
 
 
 @pytest.fixture
@@ -200,6 +214,23 @@ async def test_persist_writes_decimal_item_with_ttl(monkeypatch: pytest.MonkeyPa
     assert written["item"]["duration_s"] == Decimal("2.5")
     assert written["item"]["ttl"] == 1_000 + 90 * 24 * 3600
     assert "ip" not in str(written["item"]).lower()
+    assert written["item"]["share_id"] == "9"
+
+
+async def test_persist_drops_null_share_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A NULL key attribute would be rejected by the share_id GSI, so it must be absent.
+    written: dict[str, Any] = {}
+
+    class FakeTable:
+        def put_item(self, *, Item: dict[str, Any]) -> None:  # noqa: N803
+            written["item"] = Item
+
+    fake = SimpleNamespace(resource=lambda *_a, **_k: SimpleNamespace(Table=lambda _n: FakeTable()))
+    monkeypatch.setattr(metrics, "boto3", fake)
+    monkeypatch.setenv("DEMO_CALLS_TABLE", "demo-calls")
+    report = CallMetrics("nodash", "t", 0.0, "m", "r").report(end_ts=1.0)
+    await metrics.persist_report(report, region="us-east-1")
+    assert "share_id" not in written["item"]
 
 
 async def test_persist_skips_without_table_and_swallows_errors(

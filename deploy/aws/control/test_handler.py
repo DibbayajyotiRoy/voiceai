@@ -1,10 +1,13 @@
-"""Stubbed checks for control/handler.py: start, status, idle-stop rules, admin summary."""
+"""Stubbed checks for control/handler.py: start, status, idle-stop rules, admin summary,
+public share report, and POST /track."""
 
 import json
 import os
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -305,6 +308,7 @@ def admin(monkeypatch):
     monkeypatch.setattr(handler, "_ce_cache", None)
     monkeypatch.setattr(handler, "sm", FakeSM())
     monkeypatch.setattr(handler, "calls_table", FakeTable())
+    monkeypatch.setattr(handler, "events_table", FakeEvents())
     ce = FakeCE()
     monkeypatch.setattr(handler, "ce", ce)
     return SimpleNamespace(ce=ce)
@@ -384,3 +388,283 @@ def test_unknown_container_health_still_reaches_securing() -> None:
     # "not healthy" kept every task at "starting" forever and nobody could call.
     task = {"lastStatus": "RUNNING", "ip": "1.2.3.4", "app_health": "UNKNOWN"}
     assert handler._stage(task) == "securing"
+
+
+# ---------- /report/{share_id} (public) ----------
+
+SHARE = "86fdbaf79dd94261b5ef4faf1ef5a854"
+
+
+class FakeShareTable:
+    """Answers the share_id-index query by matching the key value in the condition."""
+
+    def __init__(self, items):
+        self.items = items
+        self.index = None
+
+    def query(self, IndexName, KeyConditionExpression, Limit):
+        self.index = IndexName
+        _, value = KeyConditionExpression.get_expression()["values"]
+        return {"Items": [i for i in self.items if i.get("share_id") == value][:Limit]}
+
+
+def shared_item():
+    return {
+        "call_id": f"SmallWebRTCConnection#0-{SHARE}",
+        "share_id": SHARE,
+        "started_at": "2026-11-08T10:00:00Z",
+        "duration_s": Decimal("12.5"),
+        "turns": Decimal(2),
+        "latency_ms": {"p50": Decimal("600"), "p95": Decimal("900")},
+        "per_turn_ms": [Decimal("600.5")],
+        "tokens": {"speech_in": Decimal(10)},
+        "est_cost_usd": Decimal("0.0123"),
+        "latency_basis": "model_end_of_turn",
+        "ttl": Decimal(1900000000),
+    }
+
+
+def report_event(share_id):
+    return {
+        "requestContext": {"http": {"method": "GET"}},
+        "rawPath": f"/demo/report/{share_id}",
+        "headers": {},
+    }
+
+
+@pytest.fixture
+def share(monkeypatch):
+    table = FakeShareTable([shared_item()])
+    monkeypatch.setattr(handler, "calls_table", table)
+    return table
+
+
+@pytest.mark.parametrize("bad", ["nope", SHARE.upper(), SHARE[:31], SHARE + "0", "g" * 32])
+def test_report_404_for_malformed_share_id(share, bad):
+    out = handler.handler(report_event(bad), None)
+    assert out["statusCode"] == 404
+    assert json.loads(out["body"]) == {"error": "not found"}
+    assert share.index is None  # never queried
+
+
+def test_report_404_for_unknown_share_id(share):
+    out = handler.handler(report_event("0" * 32), None)
+    assert out["statusCode"] == 404
+    assert json.loads(out["body"]) == {"error": "not found"}
+
+
+def test_report_200_public_strips_ttl_and_tokens(share):
+    out = handler.handler(report_event(SHARE), None)  # no auth header on purpose
+    assert out["statusCode"] == 200
+    assert out["headers"]["cache-control"] == "public, max-age=3600"
+    body = json.loads(out["body"])
+    assert share.index == "share_id-index"
+    assert "ttl" not in body
+    assert "tokens" not in body
+    assert body["est_cost_usd"] == pytest.approx(0.0123)  # kept, and a float
+    assert body["duration_s"] == 12.5
+    assert body["latency_ms"] == {"p50": 600.0, "p95": 900.0}
+    assert body["latency_basis"] == "model_end_of_turn"
+    assert body["share_id"] == SHARE
+
+
+# ---------- POST /track ----------
+
+TRACK = "t" * 40
+
+
+class FakeEvents:
+    def __init__(self, items=()):
+        self.items = list(items)
+        self.put: list[dict[str, Any]] = []
+
+    def scan(self, **kwargs):
+        return {"Items": self.items}
+
+    def put_item(self, *, Item):
+        self.put.append(Item)
+
+
+@pytest.fixture
+def track_env(monkeypatch):
+    monkeypatch.setattr(handler, "sm", FakeSM(secret=TRACK))
+    monkeypatch.setattr(handler, "_track_secret", None)
+    events = FakeEvents()
+    monkeypatch.setattr(handler, "events_table", events)
+    return events
+
+
+def track_event(raw, secret=TRACK):
+    headers = {} if secret is None else {"X-Track-Secret": secret}  # header names are case-free
+    return {
+        "requestContext": {"http": {"method": "POST"}},
+        "rawPath": "/demo/track",
+        "headers": headers,
+        "body": raw,
+    }
+
+
+def test_track_401_without_secret(track_env):
+    out = handler.handler(track_event(json.dumps({"type": "page_view", "path": "/"}), None), None)
+    assert out["statusCode"] == 401
+    assert track_env.put == []
+
+
+def test_track_401_with_wrong_secret(track_env):
+    out = handler.handler(
+        track_event(json.dumps({"type": "page_view", "path": "/"}), "x" * 40), None
+    )
+    assert out["statusCode"] == 401
+    assert track_env.put == []
+
+
+def test_track_stores_only_known_fields(track_env):
+    body = {
+        "type": "report_shared",
+        "path": "/demo",
+        "share_id": SHARE,
+        "channel": "x",
+        "utm": {"source": "x", "campaign": "launch", "term": "dropped"},
+        "referrer_host": "t.co",
+        "geo": {"country": "de", "region": "BE", "city": "Berlin", "lat": 52.52, "lon": 13.4},
+        "visitor": "a" * 64,
+        "ip": "203.0.113.9",
+        "extra": 1,
+    }
+    out = handler.handler(track_event(json.dumps(body)), None)
+    assert out["statusCode"] == 200
+    assert json.loads(out["body"]) == {"ok": True}
+
+    (item,) = track_env.put
+    assert "ip" not in item and "extra" not in item
+    assert "203.0.113.9" not in str(item)
+    assert item["type"] == "report_shared"
+    assert item["share_id"] == SHARE
+    assert item["utm"] == {"source": "x", "campaign": "launch"}
+    assert item["geo"] == {
+        "country": "DE",
+        "region": "BE",
+        "city": "Berlin",
+        "lat": Decimal("52.52"),
+        "lon": Decimal("13.4"),
+    }
+    assert item["ts"].endswith("Z")
+    assert uuid.UUID(item["event_id"]).version == 4
+    now = int(datetime.now(UTC).timestamp())
+    assert now + 179 * 86400 < item["ttl"] <= now + 180 * 86400 + 5
+
+
+BAD_BODIES = [
+    json.dumps({"type": "nope", "path": "/"}),
+    json.dumps({"type": "page_view"}),  # path required
+    json.dumps({"type": "page_view", "path": "/" * 201}),
+    json.dumps({"type": "page_view", "path": "/", "share_id": "ABC"}),
+    json.dumps({"type": "page_view", "path": "/", "visitor": "a" * 63}),
+    json.dumps({"type": "report_shared", "path": "/", "channel": "myspace"}),
+    json.dumps({"type": "page_view", "path": "/", "utm": {"source": "s" * 61}}),
+    json.dumps({"type": "page_view", "path": "/", "utm": "source=x"}),
+    json.dumps({"type": "page_view", "path": "/", "referrer_host": "r" * 101}),
+    json.dumps({"type": "page_view", "path": "/", "geo": {"country": "USA", "lat": 1, "lon": 1}}),
+    json.dumps({"type": "page_view", "path": "/", "geo": {"country": "US", "lat": 91, "lon": 1}}),
+    json.dumps({"type": "page_view", "path": "/", "geo": {"country": "US", "lat": True, "lon": 1}}),
+    json.dumps({"type": "page_view", "path": "/", "geo": {"country": "US", "lat": 1, "lon": 181}}),
+    json.dumps({"type": "page_view", "path": "/", "geo": {"country": "US", "lat": 1}}),
+    '{"type":"page_view","path":"/","geo":{"country":"US","lat":NaN,"lon":1}}',
+    "[1, 2]",
+    "{not json",
+    json.dumps({"type": "page_view", "path": "/", "pad": "a" * 4096}),  # over 4 KB
+]
+
+
+@pytest.mark.parametrize("raw", BAD_BODIES)
+def test_track_400_on_invalid_body(track_env, raw):
+    out = handler.handler(track_event(raw), None)
+    assert out["statusCode"] == 400
+    assert "error" in json.loads(out["body"])
+    assert track_env.put == []
+
+
+# ---------- admin summary: traffic ----------
+
+
+def test_admin_traffic_shape(admin, monkeypatch):
+    def geo(country, lat, lon, city=None):
+        g = {"country": country, "lat": Decimal(str(lat)), "lon": Decimal(str(lon))}
+        if city:
+            g["city"] = city
+        return g
+
+    rows = [
+        {
+            "type": "page_view",
+            "ts": "2026-11-08T01:00:00Z",
+            "visitor": "1" * 64,
+            "utm": {"source": "x"},
+            "geo": geo("US", 40.7, -74.0, "New York"),
+        },
+        {
+            "type": "page_view",
+            "ts": "2026-11-08T02:00:00Z",
+            "visitor": "1" * 64,
+            "utm": {"source": "x"},
+            "geo": geo("US", 40.7, -74.0),
+        },
+        {
+            "type": "page_view",
+            "ts": "2026-11-08T03:00:00Z",
+            "visitor": "2" * 64,
+            "utm": {"source": "linkedin"},
+            "geo": geo("DE", 52.5, 13.4),
+        },
+        {"type": "page_view", "ts": "2026-11-08T04:00:00Z", "visitor": "2" * 64},  # no geo
+        {"type": "call_started", "ts": "2026-11-08T05:00:00Z", "geo": geo("DE", 52.5, 13.4)},
+        {"type": "call_completed", "ts": "2026-11-08T06:00:00Z"},
+        {"type": "report_shared", "ts": "2026-11-08T06:30:00Z", "channel": "x"},
+        {"type": "report_shared", "ts": "2026-11-08T06:31:00Z", "channel": "copy"},
+        {"type": "report_shared", "ts": "2026-11-08T06:32:00Z", "channel": "x"},
+        {"type": "report_opened", "ts": "2026-11-08T07:00:00Z", "geo": geo("US", 40.7, -74.0)},
+    ]
+    monkeypatch.setattr(handler, "events_table", FakeEvents(rows))
+    out = handler.handler(admin_event(f"Bearer {TOKEN}"), None)
+    assert out["statusCode"] == 200
+    traffic = json.loads(out["body"])["traffic"]
+
+    assert traffic["page_views"] == 4
+    assert traffic["unique_visitors"] == 2
+    assert traffic["calls_started"] == 1
+    assert traffic["calls_completed"] == 1
+    assert traffic["report_opens"] == 1
+    assert traffic["shares_by_channel"] == {"x": 2, "copy": 1}
+    assert traffic["utm_sources"] == [
+        {"source": "x", "views": 2},
+        {"source": "linkedin", "views": 1},
+    ]
+    assert traffic["by_country"] == [
+        {"country": "US", "views": 2, "calls": 0, "opens": 1},
+        {"country": "DE", "views": 1, "calls": 1, "opens": 0},
+    ]
+    assert len(traffic["points"]) == 5  # the geo-less page view is not a point
+    assert traffic["points"][0] == {
+        "lat": 40.7,
+        "lon": -74.0,
+        "type": "report_opened",
+        "city": None,
+        "country": "US",
+    }
+    assert all(isinstance(p["lat"], float) for p in traffic["points"])
+
+
+def test_traffic_points_capped_and_newest_first():
+    rows = [
+        {
+            "type": "page_view",
+            "ts": f"2026-01-01T00:{i // 60:02d}:{i % 60:02d}Z",
+            "geo": {"country": "US", "lat": 1.0, "lon": 2.0},
+        }
+        for i in range(600)
+    ]
+    traffic = handler._traffic(rows)
+    assert len(traffic["points"]) == handler.TRAFFIC_POINTS
+    assert traffic["points"][0]["type"] == "page_view"
+    assert traffic["page_views"] == 600
+    assert traffic["by_country"] == [{"country": "US", "views": 600, "calls": 0, "opens": 0}]

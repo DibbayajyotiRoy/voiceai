@@ -40,8 +40,10 @@ const walk = (dir) => {
     else if (/\.(js|html|css|rsc)$/.test(name)) files.push(p);
   }
 };
+let staticCount = 0;
 if (existsSync(join(outDir, "static")) && existsSync(join(outDir, "server"))) {
   walk(join(outDir, "static"));
+  staticCount = files.length; // files[0..staticCount) are browser chunks
   walk(join(outDir, "server", "app"));
 }
 
@@ -63,6 +65,11 @@ for (const f of files) {
 for (const { re, label } of banned) {
   ok(!re.test(bundle), `bundle free of ${label}`);
 }
+
+// 2b. the track secret name never reaches browser chunks (server code names it by design)
+let clientBundle = "";
+for (const f of files.slice(0, staticCount)) clientBundle += readFileSync(f, "utf8");
+ok(!clientBundle.includes("TRACK_SECRET"), "browser chunks free of the track secret name");
 
 // 3. analytics events wired
 for (const event of [

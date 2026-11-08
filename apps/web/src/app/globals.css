@@ -133,3 +133,17 @@ body {
 
 .skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--ink); color: var(--ground); padding: 0.6rem 1rem; }
 .skip:focus { left: 8px; }
+
+/* Post-call report modal (native dialog): booth ground, scrolls inside itself when tall. */
+.report-dialog {
+  padding: 0;
+  width: min(92vw, 60ch);
+  max-width: 92vw;
+  max-height: 90dvh;
+  overflow-y: auto;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+.report-dialog::backdrop { background: rgb(0 0 0 / 0.6); }
