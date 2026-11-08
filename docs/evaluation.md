@@ -44,4 +44,22 @@ The target is 1,000 simultaneously active calls, not 1,000 calls per day.
 
 ## Current result ledger
 
-No model or capacity result has been measured yet. Generated reports will be stored as versioned artifacts with a clear `measured`, `simulated`, or `target` label.
+Measured on this machine (2026-11-08), reproducible via the printed commands:
+
+| Result | Value | Label | Command |
+|---|---|---|---|
+| Backend tests | 54 passed, 0 failed | measured | `uv run pytest -q` |
+| Lint / strict typing | 0 ruff errors, 0 pyright errors | measured | `uv run ruff check . && uv run pyright` |
+| Local voice scenario | 11/11 checks PASS | measured | `uv run python -m services.orchestrator.demo` |
+| Admission control | 200 requested / 50 admitted / 150 fast-busy / 0 errors; p50 turn 0.13 ms (orchestration only, fake providers) | measured | `loadtest.harness.run_load` |
+| Retrieval eval fixture | recall@3 = 1.0, MRR = 1.0 on 1-case fixture | measured (fixture only, not a quality claim) | `tests/test_evals.py` |
+
+Pending (blocked, honestly labeled everywhere):
+
+| Result | Blocker | Path |
+|---|---|---|
+| 1,000 concurrent media calls | production GPU fleet; harness refuses non-media configs | `loadtest/run.py` + `configs/concurrent-1000.json` |
+| OpenRouter/Bedrock live smoke | entitled credentials | `evals/provider_smoke.py` |
+| STT/TTS telephony WER + serving | GPU box, [speech] extras, frozen holdout | `evals/speech_release.py`, `training/prepare.py` |
+
+Generated reports will be stored as versioned artifacts with a clear `measured`, `simulated`, or `target` label.

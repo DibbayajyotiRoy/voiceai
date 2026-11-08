@@ -7,7 +7,12 @@ A Charly-inspired engineering project for German municipal phone conversations. 
 
 ## Status
 
-Architecture and implementation documentation are approved. Code and measured results are added in the implementation phases. No benchmark, production-readiness, hiring, or 1,000-concurrent-call result is claimed before it is reproduced.
+Implementation complete for the local/private system and the hosted presentation (2026-11-08). Gate status: **G1–G5 met, G6–G8 blocked** (see [GATES.md](GATES.md) for exact evidence and commands).
+
+- 54 backend tests, strict Ruff + Pyright clean, deterministic German voice demo passing (`LOCAL_VOICE_DEMO_PASSED`).
+- Admission control measured on this machine: 50 concurrent calls, 200 requested, 150 fast-busy rejections, 0 errors (orchestration-only, fake providers — not a 1,000-call claim).
+- Live demo-mode site: https://voiceai-presentation.vercel.app (G4 + G5 verified against the deployment).
+- Not claimed: 1,000 concurrent media calls (needs the production GPU fleet), live OpenRouter/Bedrock smoke (needs credentials), speech WER/MOS numbers (needs the GPU-box holdout eval). All three have runnable entry points that fail honestly until unblocked.
 
 ## Design summary
 

@@ -38,6 +38,13 @@ Use Vercel Web Analytics and Speed Insights. Track only events that answer wheth
 
 Properties are limited to safe section or scenario identifiers. No names, email addresses, transcripts, call IDs, or other PII enter analytics. Events must fire once at their defined trigger and be checked on the deployed site.
 
+## Deployment
+
+Live demo-mode deployment: https://voiceai-presentation.vercel.app
+
+- `npm --prefix apps/web run build && node scripts/verify-presentation.mjs` → G4 (passed 2026-11-08)
+- `node scripts/verify-deployed-presentation.mjs https://voiceai-presentation.vercel.app` → G5 (passed 2026-11-08)
+
 A tagged application URL can help distinguish an outreach campaign where supported. Anonymous visits, referrers, devices, locations, and engagement do **not** prove that Charly or a particular reviewer visited. Do not attempt covert identification.
 
 Add another analytics provider only if a specific question remains unanswered. Configure any cookie-based tooling with appropriate notice/consent and EU privacy settings.
