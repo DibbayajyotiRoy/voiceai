@@ -1,0 +1,378 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  voiceai DEMO stack (cost-minimal). Fargate ARM64 task (app + Caddy TLS sidecar), public
+  subnets, no NAT, no ALB. Control Lambda starts/stops the task and maintains the DNS A record.
+  Idle cost is ~$0 (desiredCount 0, EFS/ECR/logs are pennies). See deploy/aws/README.md.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: demo-api.dibbayajyoti.com
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Tag of the app image pushed to the ECR repo (deploy-demo.sh sets the git sha).
+  CaddyImage:
+    Type: String
+    Default: public.ecr.aws/docker/library/caddy:2
+    Description: Official Caddy 2 image (ECR Public mirror avoids Docker Hub anonymous pull limits).
+  VercelTeamId:
+    Type: String
+    Default: ""
+    Description: Vercel team id if dibbayajyoti.com lives under a team. Empty for personal account.
+
+Resources:
+  # ---------- Network: 2 public subnets, IGW, no NAT ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: voiceai-demo }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: voiceai-demo }]
+
+  IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.1.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+
+  SubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # Task ENI gets a public IP (assignPublicIp ENABLED). Egress is open by default.
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Demo task - HTTP(S) for ACME and API, UDP for WebRTC media
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: ACME HTTP-01 and redirect }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS API }
+        # aiortc picks random UDP ports for ICE/media, so the whole ephemeral range is open.
+        # Documented in README: this is the price of no TURN server.
+        - { IpProtocol: udp, FromPort: 1024, ToPort: 65535, CidrIp: 0.0.0.0/0, Description: WebRTC media }
+
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NFS from demo task only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 2049, ToPort: 2049, SourceSecurityGroupId: !Ref TaskSecurityGroup }
+
+  # ---------- Caddy cert storage ----------
+  # Standard (multi-AZ) EFS, not One Zone: the task may be placed in either subnet, and a
+  # One Zone file system would fail to mount in the other AZ. Storage is a few KB (~$0).
+  # Persisting /data means the Let's Encrypt cert is reused across task restarts, so every
+  # start does not hit LE's 5-duplicate-certs-per-week limit for demo-api.dibbayajyoti.com.
+  CaddyDataFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      FileSystemTags: [{ Key: Name, Value: voiceai-demo-caddy-data }]
+
+  MountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref CaddyDataFileSystem
+      SubnetId: !Ref SubnetA
+      SecurityGroups: [!Ref EfsSecurityGroup]
+
+  MountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref CaddyDataFileSystem
+      SubnetId: !Ref SubnetB
+      SecurityGroups: [!Ref EfsSecurityGroup]
+
+  # ---------- Registry, logs ----------
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: voiceai-demo
+      ImageTagMutability: MUTABLE
+      EmptyOnDelete: true
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep last 5 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/voiceai-demo
+      RetentionInDays: 7
+
+  # ---------- IAM ----------
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: nova-sonic-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:InvokeModelWithBidirectionalStream
+                Resource:
+                  - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-2-sonic-v1:0
+                  # Cross-region inference profile form; needed if the call goes through the us. profile.
+                  - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.amazon.nova-2-sonic-v1:0
+
+  ControlFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: control
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ecs:DescribeServices, ecs:UpdateService]
+                Resource: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/voiceai-demo/voiceai-demo
+              - Effect: Allow
+                # ListTasks/DescribeTasks/DescribeNetworkInterfaces do not support useful resource scoping.
+                Action: [ecs:ListTasks, ecs:DescribeTasks, ec2:DescribeNetworkInterfaces]
+                Resource: "*"
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                # Secret name is voiceai/vercel-token (created by hand; see README). Suffix is random.
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:voiceai/vercel-token-*
+
+  # ---------- ECS ----------
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: voiceai-demo
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: voiceai-demo
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"      # 0.5 vCPU
+      Memory: "1024"  # 1 GB
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: caddy-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref CaddyDataFileSystem
+            RootDirectory: /
+            TransitEncryption: ENABLED   # required for EFS on Fargate
+      ContainerDefinitions:
+        - Name: app
+          Image: !Sub ${EcrRepository.RepositoryUri}:${ImageTag}
+          Essential: true
+          PortMappings:
+            - { ContainerPort: 8000, Protocol: tcp }   # reachable only via localhost (Caddy)
+          Environment:
+            - { Name: APP_ENV, Value: demo }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: DEMO_AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: DEMO_MAX_SESSION_SECONDS, Value: "300" }
+            - { Name: DEMO_ALLOWED_ORIGINS, Value: "https://dibbayajyoti.com,https://voiceai-presentation.vercel.app,http://localhost:3000" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+        # Caddy: ENTRYPOINT in the official image is `caddy`, so Command starts at the subcommand.
+        # Automatic HTTPS for DomainName; state (certs, ACME account) lives in /data on EFS.
+        - Name: caddy
+          Image: !Ref CaddyImage
+          Essential: true
+          Command: [reverse-proxy, --from, !Ref DomainName, --to, "localhost:8000"]
+          Environment:
+            - { Name: XDG_DATA_HOME, Value: /data }
+          PortMappings:
+            - { ContainerPort: 80, Protocol: tcp }
+            - { ContainerPort: 443, Protocol: tcp }
+          MountPoints:
+            - { SourceVolume: caddy-data, ContainerPath: /data }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: caddy
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: [MountTargetA, MountTargetB]
+    Properties:
+      ServiceName: voiceai-demo
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      # Always 0 in the template. The control Lambda sets 1 on /start. Note: a CloudFormation
+      # update resets this to 0, so redeploy only when the demo is idle.
+      DesiredCount: 0
+      # One-task demo: stop the old task before starting the new one (no double cost).
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: [!Ref SubnetA, !Ref SubnetB]
+          SecurityGroups: [!Ref TaskSecurityGroup]
+
+  # ---------- Control plane ----------
+  ControlFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: voiceai-demo-control
+      Runtime: python3.12
+      Handler: handler.handler
+      # Local dir; `aws cloudformation package` zips and uploads it (deploy-demo.sh does this).
+      Code: control
+      Role: !GetAtt ControlFunctionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CLUSTER: voiceai-demo
+          SERVICE: voiceai-demo
+          PUBLIC_HOST: !Ref DomainName
+          DNS_ZONE: dibbayajyoti.com
+          DNS_RECORD: demo-api
+          VERCEL_SECRET_ID: voiceai/vercel-token
+          VERCEL_TEAM_ID: !Ref VercelTeamId
+
+  ControlUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ControlFunction.Arn
+      AuthType: NONE
+      Cors:
+        AllowOrigins: [https://dibbayajyoti.com, https://voiceai-presentation.vercel.app, http://localhost:3000]
+        AllowMethods: [GET, POST]
+        AllowHeaders: [content-type]
+        MaxAge: 300
+
+  ControlUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ControlFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  # Some Lambda accounts also require InvokeFunction for public URLs. Same exposure as the URL.
+  ControlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ControlFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+
+  IdleSweepRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Stop the demo task when idle or over 60 minutes
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - { Id: idle-sweep, Arn: !GetAtt ControlFunction.Arn }
+
+  IdleSweepPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ControlFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt IdleSweepRule.Arn
+
+Outputs:
+  ControlUrl:
+    Description: Call POST /start, then poll GET /status
+    Value: !GetAtt ControlUrl.FunctionUrl
+  DemoUrl:
+    Value: !Sub https://${DomainName}
+  EcrRepositoryUri:
+    Value: !GetAtt EcrRepository.RepositoryUri
+  ClusterName:
+    Value: voiceai-demo
+  ServiceName:
+    Value: voiceai-demo

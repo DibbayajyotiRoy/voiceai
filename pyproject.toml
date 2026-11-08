@@ -31,6 +31,9 @@ speech = [
   "torch>=2.6",
   "transformers>=4.50",
 ]
+demo = [
+    "pipecat-ai[aws-nova-sonic,webrtc]>=0.0.80",
+]
 
 [dependency-groups]
 dev = [
@@ -62,6 +65,9 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
+"**/test_*.py" = ["S101"]
+# Lambda only opens fixed https:// URLs (Vercel API, demo /health).
+"deploy/aws/control/handler.py" = ["S310"]
 
 [tool.pyright]
 pythonVersion = "3.12"

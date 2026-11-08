@@ -13,6 +13,7 @@ transport; the orchestration behind it is identical.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -20,6 +21,7 @@ from typing import Any
 
 from contracts.state import CallState
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 
@@ -50,6 +52,26 @@ async def _build_knowledge() -> KnowledgeService:
 
 
 app = FastAPI(title="municipal-voiceai", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.environ.get(
+            "DEMO_ALLOWED_ORIGINS",
+            "https://dibbayajyoti.com,https://voiceai-presentation.vercel.app,http://localhost:3000",
+        ).split(",")
+        if origin.strip()
+    ],
+    allow_methods=["GET", "POST", "PATCH"],
+    allow_headers=["*"],
+)
+
+try:  # Browser demo needs the `demo` extra; core install works without it.
+    from services.demo.bot import router as demo_router
+except ImportError:
+    demo_router = None
+if demo_router is not None:
+    app.include_router(demo_router)
 
 # Per-call event waterfall, newest first; bounded. This is the " Flight
 # recorder" the runbook points at: when a citizen complains, dump the call.

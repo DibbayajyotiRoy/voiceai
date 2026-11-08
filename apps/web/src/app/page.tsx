@@ -1,7 +1,7 @@
 import { ArchitectureExplorer } from "@/components/ArchitectureExplorer";
 import { BenchmarkDownload } from "@/components/BenchmarkDownload";
 import { ContactLink } from "@/components/ContactLink";
-import { DemoReplay } from "@/components/DemoReplay";
+import { LiveDemo } from "@/components/LiveDemo";
 import { LifecycleTracker } from "@/components/LifecycleTracker";
 import {
   honestLimitations,
@@ -154,7 +154,7 @@ export default function Page() {
             idempotent tool, dictated numbers, and barge-in. It is the same
             scenario the CI gate runs.
           </p>
-          <DemoReplay />
+          <LiveDemo />
         </section>
 
         {/* ------------------------------------------------ load */}

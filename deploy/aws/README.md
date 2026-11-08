@@ -1,0 +1,101 @@
+# AWS DEMO deploy (cost-minimal)
+
+Public browser demo at `https://demo-api.dibbayajyoti.com`, running on one Fargate ARM64 task.
+Idle, nothing runs. A control Lambda starts the task on request and stops it when idle.
+Production layout is in [full.md](full.md) and is **not** deployed by this stack.
+
+## What gets created (`demo.yaml`, region us-east-1)
+
+- VPC with 2 public subnets, IGW, no NAT, no ALB.
+- ECS cluster `voiceai-demo`, Fargate service (`desiredCount 0`, public IP, 0.5 vCPU / 1 GB, ARM64).
+- Task: `app` (the Dockerfile image, port 8000) and `caddy` (official Caddy 2, TLS on 80/443,
+  reverse-proxies to `localhost:8000`).
+- EFS (`/data` for Caddy: certs and ACME account), ECR repo `voiceai-demo` (keeps last 5 images).
+- Control Lambda `voiceai-demo-control` with a Function URL (CORS for `https://dibbayajyoti.com`
+  and `http://localhost:3000`) and a 5-minute EventBridge sweep.
+- Task role: Bedrock invoke on Nova 2 Sonic only. Logs: `/ecs/voiceai-demo`, 7-day retention.
+
+## Prerequisites
+
+1. AWS CLI credentials for us-east-1 (`aws` or `uvx --from awscli aws`), plus Docker with buildx.
+2. Create the Vercel token yourself (Vercel dashboard, Account Settings, Tokens; scope it to the
+   `dibbayajyoti.com` DNS). Store it as a plain-text secret:
+   ```bash
+   aws secretsmanager create-secret --region us-east-1 --name voiceai/vercel-token \
+     --secret-string "<vercel-token>"
+   ```
+   The stack never creates or reads this value by name except through the Lambda.
+3. Bedrock model access for Nova 2 Sonic (`amazon.nova-2-sonic-v1:0`) enabled in us-east-1.
+
+## Deploy
+
+```bash
+deploy/aws/deploy-demo.sh
+```
+
+The script is idempotent. It creates an artifacts bucket for the Lambda zip, packages and deploys
+the stack, then builds the arm64 image and pushes it tagged with the git sha. It prints the
+control URL at the end.
+
+Then:
+
+```bash
+curl -X POST "$CONTROL/start"    # desiredCount 0 -> 1
+curl "$CONTROL/status"           # starting -> ready, with url
+```
+
+The first start takes a minute or two: ECS pulls the image, the Lambda upserts the A record
+`demo-api` to the new task IP (TTL 60), and Caddy gets or reuses a certificate. `status` returns
+`starting` until `https://demo-api.dibbayajyoti.com/health` answers.
+
+## Lifecycle rules
+
+- Stop: the sweep sets `desiredCount 0` when `active == 0` and `idle_seconds > 900`, or when the
+  task has run more than 60 minutes. It never stops a task that has an active call, except for
+  the 60-minute cap.
+- Redeploying the stack resets `desiredCount` to 0 (it is a template value). Run the deploy
+  script when the demo is idle.
+
+## Design choices
+
+- **Cert storage: EFS (Standard, multi-AZ) mounted at `/data`.** Caddy keeps its certs there, so a
+  restarted task reuses the certificate instead of asking Let's Encrypt again. Without that, each
+  start issues a cert for the same name, and Let's Encrypt allows 5 per exact domain per week.
+  Standard EFS, not One Zone, because the task can land in either subnet. Storage is a few KB.
+- **WebRTC UDP 1024-65535 open to 0.0.0.0/0.** aiortc picks random UDP ports, so the whole
+  ephemeral range is open. This is the cost of having no TURN server. Tighten it once the app
+  pins a port range.
+- **Caddy image via ECR Public mirror** (`public.ecr.aws/docker/library/caddy:2`) to avoid Docker
+  Hub anonymous pull limits from Fargate IPs. Override with the `CaddyImage` parameter.
+
+## Cost estimate (us-east-1, approximate, check current pricing)
+
+| Item | Idle | Running |
+|---|---|---|
+| Fargate ARM64 0.5 vCPU / 1 GB | $0 | about $0.02/hr |
+| Public IPv4 on the task | $0 | about $0.005/hr |
+| Nova 2 Sonic | $0 | per-audio-minute, see Bedrock pricing |
+| EFS, ECR (about 8 GB for 5 images), logs | about $1/mo | same |
+| Secrets Manager secret | $0.40/mo | same |
+| Lambda + 5-minute sweep | free tier | same |
+| Vercel DNS | free | free |
+
+Idle total is about $1.50/mo, mostly the secret and image storage.
+
+## Teardown
+
+```bash
+aws cloudformation delete-stack --region us-east-1 --stack-name voiceai-demo
+aws cloudformation wait stack-delete-complete --region us-east-1 --stack-name voiceai-demo
+aws s3 rb s3://voiceai-demo-artifacts-<account-id> --force
+aws secretsmanager delete-secret --region us-east-1 --secret-id voiceai/vercel-token   # optional
+```
+
+Also remove the `demo-api` A record in the Vercel dashboard. The stack does not delete it.
+The ECR repo is emptied on delete (`EmptyOnDelete`).
+
+## Tests
+
+```bash
+uv run python -m pytest deploy/aws/control -q
+```
