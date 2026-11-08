@@ -19,78 +19,48 @@ function estimate(idx: number, stageS: number, secs: number) {
   return s.lo + (s.hi - s.lo) * (1 - Math.exp((-3 * stageS) / s.typical));
 }
 
+// `sinceS` is the server's task age: it can predate the click, so it only paces the bar.
+// `elapsed` is time since the user's click and is the only clock shown.
 type Props = { stage: string | null; sinceS: number | null; elapsed: number };
 
 export function WakeProgress({ stage, sinceS, elapsed }: Props) {
   const idx = STEPS.findIndex((s) => s.stage === stage);
-  const secs = Math.floor(sinceS ?? elapsed);
-  // Seconds at which the current stage was first seen; the parent re-renders every second.
-  const [entered, setEntered] = useState({ stage, at: secs });
-  if (entered.stage !== stage) setEntered({ stage, at: secs });
-  const stageS = secs - entered.at;
-  const pct = stage === "ready" ? 100 : estimate(idx, stageS, secs);
+  const paceS = Math.floor(sinceS ?? elapsed);
+  // Pace-seconds at which the current stage was first seen; the parent re-renders every second.
+  const [entered, setEntered] = useState({ stage, at: paceS });
+  if (entered.stage !== stage) setEntered({ stage, at: paceS });
+  const stageS = paceS - entered.at;
+  const pct = stage === "ready" ? 100 : estimate(idx, stageS, paceS);
   const current = idx >= 0 ? STEPS[idx] : null;
-  const stepText =
-    secs > LONG_WAIT_S
-      ? "Taking longer than usual. Still trying…"
-      : `${current ? current.label : "Waking the agent"}…`;
+  const longWait = elapsed > LONG_WAIT_S;
+  const label = longWait
+    ? "Taking longer than usual. Still trying…"
+    : current
+      ? current.label
+      : "Waking the agent";
 
   return (
     <div className="flex w-full max-w-[52ch] flex-col items-center gap-4">
-      <ol
-        aria-label="Wake progress"
-        className="mono flex w-full flex-wrap justify-center gap-x-4 gap-y-2 text-[0.8125rem] min-[480px]:justify-between"
+      <div
+        role="status"
+        aria-live="polite"
+        className="mono flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm"
       >
-        {STEPS.map((s, i) => {
-          const done = idx > i;
-          const now = idx === i;
-          return (
-            <li
-              key={s.stage}
-              aria-current={now ? "step" : undefined}
-              className={`flex items-center gap-2 ${now ? "" : "max-[479px]:hidden"} ${
-                done ? "text-ink" : now ? "text-pen" : "text-muted"
-              }`}
-            >
-              {done ? (
-                <svg
-                  aria-hidden="true"
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                >
-                  <path d="M1.5 5.2 4 7.6 8.5 2.4" />
-                </svg>
-              ) : (
-                <span
-                  aria-hidden="true"
-                  className={`inline-block size-1.5 rounded-full ${now ? "wake-dot bg-pen" : "border border-muted"}`}
-                />
-              )}
-              {s.label}
-            </li>
-          );
-        })}
-      </ol>
-      {current && (
-        <p className="mono text-[0.8125rem] text-muted min-[480px]:hidden">
-          step {idx + 1} of {STEPS.length}
-        </p>
-      )}
+        <span aria-hidden="true" className="wake-dot inline-block size-1.5 rounded-full bg-pen" />
+        <span key={label} className="wake-label inline-block text-ink">
+          {label}
+        </span>
+        {!longWait && current && <span className="text-muted">step {idx + 1} of {STEPS.length}</span>}
+        <span aria-hidden="true" className="text-muted">
+          {elapsed}s
+        </span>
+      </div>
       <div aria-hidden="true" className="h-[2px] w-full overflow-hidden bg-line">
         <div className="wake-bar h-full w-full origin-left bg-pen" style={{ transform: `scaleX(${pct / 100})` }} />
       </div>
-      <p role="status" aria-live="polite" className="mono text-center text-sm text-muted">
-        {stepText} <span aria-hidden="true">{secs}s</span>
-      </p>
-      <p className="mono max-w-[52ch] text-center text-sm text-muted">
-        Waking the agent on AWS. First call takes up to two minutes; it sleeps when unused.
-      </p>
-      <p className="mono max-w-[52ch] text-center text-sm text-muted">
-        Honestly, I don&apos;t have enough money to keep AWS running it all day.
+      <p className="mono max-w-[44rem] text-center text-sm text-muted">
+        Waking the agent on AWS. First call takes up to two minutes; it sleeps when unused because I don&apos;t have
+        enough money to keep AWS running it all day.
       </p>
     </div>
   );

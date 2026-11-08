@@ -122,9 +122,13 @@ body {
 .wake-dot { animation: wake-pulse 1.6s ease-in-out infinite; }
 @keyframes wake-pulse { 50% { opacity: 0.35; transform: scale(0.7); } }
 .wake-bar { transition: transform 0.9s var(--ease); }
+/* The stage label is keyed by its text, so each stage change remounts it and it fades up. */
+.wake-label { animation: wake-in 0.5s var(--ease) both; }
+@keyframes wake-in { from { opacity: 0; transform: translateY(0.4em); } }
 @media (prefers-reduced-motion: reduce) {
   .wake-dot { animation: none; }
   .wake-bar { transition: none; }
+  .wake-label { animation: none; }
 }
 
 .skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--ink); color: var(--ground); padding: 0.6rem 1rem; }
