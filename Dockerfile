@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Demo/API image. Built for linux/arm64 (Fargate Graviton) by deploy/aws/deploy-demo.sh.
+# Demo/API image. Built for linux/amd64 (Fargate x86_64) by deploy/aws/deploy-demo.sh.
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.9.30
 

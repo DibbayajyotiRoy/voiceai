@@ -7,7 +7,7 @@ import { headlineMetrics, loadResult } from "@/lib/data";
 export function BenchmarkDownload() {
   const download = () => {
     const payload = {
-      generated_by: "presentation demo mode — sanitized, no infrastructure dependencies",
+      generated_by: "presentation demo mode. Sanitized, no infrastructure dependencies.",
       reproducible: true,
       metrics: headlineMetrics,
       load_result_laptop_50_concurrent: loadResult,
@@ -28,9 +28,9 @@ export function BenchmarkDownload() {
   return (
     <button
       onClick={download}
-      className="rounded border border-amber px-4 py-2 font-mono text-sm text-amber transition-colors hover:bg-amber hover:text-ink"
+      className="key"
     >
-      ↓ download benchmark JSON
+      Download benchmark JSON ↓
     </button>
   );
 }

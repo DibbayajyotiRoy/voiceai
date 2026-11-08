@@ -38,53 +38,49 @@ export function DemoReplay() {
   };
 
   return (
-    <div className="rounded-lg border border-line bg-panel">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <span className="font-mono text-xs text-dim">
-          replay: services/orchestrator/demo.py — deterministic, offline
+    <div className="border border-line">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-5 py-4">
+        <span className="mono text-xs text-muted">
+          replay: services/orchestrator/demo.py. Deterministic, offline.
         </span>
         <button
           onClick={play}
           disabled={playing}
-          className="rounded bg-amber px-3 py-1 font-mono text-xs font-semibold text-ink disabled:opacity-40"
+          className="key"
+          style={{ minHeight: 40, padding: "0 1rem", fontSize: "0.875rem" }}
         >
           {playing ? "playing…" : "▶ replay call"}
         </button>
       </div>
-      <div className="grid gap-0 md:grid-cols-[1fr_280px]">
+      <div className="grid md:grid-cols-[1fr_300px]">
         <ol className="divide-y divide-line">
           {demoReplay.slice(0, step + 1).map((turn, i) => (
-            <li key={i} className="px-4 py-3">
+            <li key={i} className="px-5 py-4">
               <div
-                className={
-                  turn.speaker === "citizen"
-                    ? "font-mono text-sm text-fg"
-                    : "font-mono text-sm text-amber"
-                }
+                className={`mono text-xs font-semibold uppercase tracking-wide ${
+                  turn.speaker === "citizen" ? "text-ink" : "text-pen"
+                }`}
               >
-                {turn.speaker === "citizen" ? "Bürger" : "Charly"}› {turn.text}
+                {turn.speaker === "citizen" ? "Citizen" : "Agent"}
               </div>
-              <div className="mt-1 font-mono text-[11px] text-dim">
-                → {turn.stateNote}
-              </div>
+              <p className="mt-1 text-base">{turn.text}</p>
+              <p className="mono mt-1 text-xs text-muted">→ {turn.stateNote}</p>
             </li>
           ))}
           {step === 0 && !playing && (
-            <li className="px-4 py-6 font-mono text-xs text-dim">
-              Press replay to watch the call: street-name capture, dictated
-              number, correction without reset, RAG grounding, idempotent tool,
-              then barge-in handling.
+            <li className="mono px-5 py-6 text-sm text-muted">
+              Press replay to watch the call: street-name capture, dictated number,
+              correction without reset, RAG grounding, idempotent tool, then barge-in
+              handling.
             </li>
           )}
         </ol>
-        <div className="border-t border-line p-4 md:border-l md:border-t-0">
-          <div className="font-mono text-[11px] uppercase tracking-wider text-dim">
-            call state
-          </div>
-          <ul className="mt-2 space-y-1 font-mono text-[11px]">
+        <div className="border-t border-line p-5 md:border-l md:border-t-0">
+          <div className="mono text-xs uppercase tracking-wider text-muted">call state</div>
+          <ul className="mono mt-3 space-y-2 text-xs text-muted">
             {demoReplay.slice(0, step + 1).map((turn, i) => (
-              <li key={i} className="text-dim">
-                <span className="text-pass">✓</span> {turn.stateNote}
+              <li key={i}>
+                <span className="text-pen">✓</span> {turn.stateNote}
               </li>
             ))}
           </ul>

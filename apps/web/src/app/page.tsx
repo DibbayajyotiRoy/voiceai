@@ -1,32 +1,46 @@
+import type { ReactNode } from "react";
 import { ArchitectureExplorer } from "@/components/ArchitectureExplorer";
 import { BenchmarkDownload } from "@/components/BenchmarkDownload";
+import { CallHud } from "@/components/CallHud";
 import { ContactLink } from "@/components/ContactLink";
-import { LiveDemo } from "@/components/LiveDemo";
 import { LifecycleTracker } from "@/components/LifecycleTracker";
+import { LiveDemo } from "@/components/LiveDemo";
+import { Reveal } from "@/components/Reveal";
+import { SignalLine } from "@/components/SignalLine";
 import {
+  headlineMetrics,
   honestLimitations,
   loadResult,
   runbookExcerpt,
   speechModels,
-  headlineMetrics,
 } from "@/lib/data";
 
-const sections = [
-  { id: "thesis", label: "Thesis" },
-  { id: "architecture", label: "Architecture" },
+const nav = [
+  { id: "demo", label: "Call" },
+  { id: "evidence", label: "Evidence" },
   { id: "speech", label: "Speech layer" },
-  { id: "demo", label: "Call replay" },
-  { id: "load", label: "Load & admission" },
-  { id: "limits", label: "Honest limits" },
+  { id: "architecture", label: "Architecture" },
+  { id: "limits", label: "Limits" },
 ];
 
-function StatusBadge({ status }: { status: "measured" | "pending" }) {
+/** Grid for every section: label in 3 columns, content in 9. Stacks on phones. */
+const grid = "wrap grid gap-y-6 md:grid-cols-12 md:gap-x-[var(--gutter)]";
+
+function Gutter({ phase, children }: { phase: string; children: ReactNode }) {
+  return (
+    <p className="phase md:col-span-3 md:pt-3">
+      <b>{phase}</b> {children}
+    </p>
+  );
+}
+
+function Tag({ status }: { status: "measured" | "pending" }) {
   return status === "measured" ? (
-    <span className="rounded-sm bg-pass/15 px-2 py-0.5 font-mono text-[11px] text-pass">
+    <span className="mono inline-block bg-ink px-2 py-0.5 text-[11px] font-semibold tracking-wide text-ground">
       MEASURED
     </span>
   ) : (
-    <span className="rounded-sm bg-pend/15 px-2 py-0.5 font-mono text-[11px] text-pend">
+    <span className="mono inline-block border border-ink px-2 py-0.5 text-[11px] font-semibold tracking-wide text-ink">
       PENDING
     </span>
   );
@@ -34,204 +48,275 @@ function StatusBadge({ status }: { status: "measured" | "pending" }) {
 
 export default function Page() {
   return (
-    <div className="mx-auto flex w-full max-w-6xl gap-10 px-6">
-      <LifecycleTracker />
-      <nav className="sticky top-0 hidden h-screen w-40 shrink-0 flex-col justify-center gap-3 self-start md:flex">
-        {sections.map((s) => (
-          <a
-            key={s.id}
-            href={`#${s.id}`}
-            className="font-mono text-xs text-dim transition-colors hover:text-amber"
-          >
-            {s.label}
+    <>
+      <header className="wrap flex items-start justify-between gap-6 pt-6">
+        <div>
+          <p className="text-lg font-semibold tracking-tight">voiceai</p>
+          <p className="phase">case study by Dibbayajyoti Roy</p>
+        </div>
+        <nav aria-label="Sections" className="flex items-center gap-6 text-sm">
+          <a href="#demo" className="trace-link inline-flex min-h-11 items-center">
+            Call
           </a>
-        ))}
-      </nav>
-
-      <main className="min-w-0 flex-1 space-y-24 py-16">
-        {/* ------------------------------------------------ thesis */}
-        <section id="thesis" className="space-y-8">
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber">
-            engineering case study · German municipal voice AI
-          </p>
-          <h1 className="max-w-2xl text-4xl font-semibold leading-tight md:text-5xl">
-            A phone agent that survives real citizens — built to be measured,
-            not demoed.
-          </h1>
-          <p className="max-w-2xl text-lg leading-relaxed text-dim">
-            Charly answers phones for German municipalities, 24/7, in 30+
-            languages. This project rebuilds the speech and orchestration layer
-            the way an eval-gated team would: every quality claim has a command
-            that reproduces it, and every number this page shows is either that
-            output or explicitly marked pending.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {headlineMetrics.map((m) => (
-              <div
-                key={m.label}
-                className="rounded-lg border border-line bg-panel p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[11px] uppercase tracking-wide text-dim">
-                    {m.label}
-                  </span>
-                  <StatusBadge status={m.status} />
-                </div>
-                <div className="mt-2 font-mono text-2xl text-fg">{m.value}</div>
-                {m.command && (
-                  <code className="mt-2 block truncate font-mono text-[11px] text-amber">
-                    $ {m.command}
-                  </code>
-                )}
-                {m.note && (
-                  <p className="mt-1 text-xs text-dim">{m.note}</p>
-                )}
-              </div>
+          <div className="hidden items-center gap-6 md:flex">
+            {nav.slice(1).map((item) => (
+              <a key={item.id} href={`#${item.id}`} className="trace-link inline-flex min-h-11 items-center">
+                {item.label}
+              </a>
             ))}
           </div>
-        </section>
-
-        {/* ------------------------------------------------ architecture */}
-        <section id="architecture" className="space-y-6">
-          <h2 className="text-2xl font-semibold">Architecture</h2>
-          <p className="max-w-2xl text-dim">
-            One pipeline per call, strict layer boundaries, and contracts that
-            let providers change without touching orchestration. Hover the
-            nodes — each one says why it exists.
-          </p>
-          <ArchitectureExplorer />
-        </section>
-
-        {/* ------------------------------------------------ speech layer */}
-        <section id="speech" className="space-y-6">
-          <h2 className="text-2xl font-semibold">The speech layer</h2>
-          <p className="max-w-2xl text-dim">
-            Open models, self-hosted on EU GPUs, chosen from a manifest-driven
-            comparison. Evaluation runs on telephony-degraded audio (8 kHz,
-            G.711 μ-law, seeded noise) with speaker-group-leakage-safe splits —
-            because clean-studio WER is not phone-call WER.
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-line">
-            <table className="w-full min-w-[720px] text-left font-mono text-sm">
-              <thead>
-                <tr className="border-b border-line bg-panel text-[11px] uppercase text-dim">
-                  <th className="px-4 py-3">model</th>
-                  <th className="px-4 py-3">family</th>
-                  <th className="px-4 py-3">params</th>
-                  <th className="px-4 py-3">German</th>
-                  <th className="px-4 py-3">license</th>
-                  <th className="px-4 py-3">telephony WER</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {speechModels.map((row) => (
-                  <tr key={row.model}>
-                    <td className="px-4 py-3 text-fg">{row.model}</td>
-                    <td className="px-4 py-3 text-dim">{row.family}</td>
-                    <td className="px-4 py-3 text-dim">{row.params}</td>
-                    <td className="px-4 py-3 text-dim">{row.german}</td>
-                    <td className="px-4 py-3 text-dim">{row.license}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={row.status} />{" "}
-                      <span className="text-[11px] text-dim">
-                        {row.werTelephony}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <BenchmarkDownload />
-        </section>
-
-        {/* ------------------------------------------------ demo replay */}
-        <section id="demo" className="space-y-6">
-          <h2 className="text-2xl font-semibold">One call, every hard case</h2>
-          <p className="max-w-2xl text-dim">
-            This is the repo&apos;s own acceptance scenario — a scripted citizen
-            call that exercises correction, retrieval grounding, a typed
-            idempotent tool, dictated numbers, and barge-in. It is the same
-            scenario the CI gate runs.
-          </p>
-          <LiveDemo />
-        </section>
-
-        {/* ------------------------------------------------ load */}
-        <section id="load" className="space-y-6">
-          <h2 className="text-2xl font-semibold">Load & admission control</h2>
-          <p className="max-w-2xl text-dim">
-            The first line of defense for 1,000 concurrent calls is refusing
-            the 1,001st fast — before any provider token is spent. Measured on
-            this machine with 200 requests against a 50-slot admission limit:
-          </p>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-line bg-panel p-4">
-              <div className="font-mono text-[11px] uppercase text-dim">
-                admitted / rejected
-              </div>
-              <div className="mt-2 font-mono text-2xl text-fg">
-                {loadResult.admitted} / {loadResult.rejected}
-              </div>
-              <div className="font-mono text-xs text-dim">
-                of {loadResult.requested} requested
-              </div>
-            </div>
-            <div className="rounded-lg border border-line bg-panel p-4">
-              <div className="font-mono text-[11px] uppercase text-dim">
-                turn latency p50 / p95
-              </div>
-              <div className="mt-2 font-mono text-2xl text-fg">
-                {loadResult.p50Ms} / {loadResult.p95Ms} ms
-              </div>
-              <div className="font-mono text-xs text-dim">
-                orchestration only, fake providers
-              </div>
-            </div>
-            <div className="rounded-lg border border-line bg-panel p-4">
-              <div className="font-mono text-[11px] uppercase text-dim">
-                wall time, 250 turns
-              </div>
-              <div className="mt-2 font-mono text-2xl text-fg">
-                {loadResult.wallTimeS} s
-              </div>
-              <div className="font-mono text-xs text-dim">0 errors recorded</div>
-            </div>
-          </div>
-          <div className="rounded-lg border border-line bg-panel p-4">
-            <div className="mb-2 font-mono text-[11px] uppercase text-dim">
-              debugging runbook — first check per symptom
-            </div>
-            <ul className="space-y-1.5 font-mono text-xs">
-              {runbookExcerpt.map((r) => (
-                <li key={r.symptom} className="flex gap-3">
-                  <span className="w-56 shrink-0 text-amber">{r.symptom}</span>
-                  <span className="text-dim">{r.firstCheck}</span>
-                </li>
+          <details className="relative md:hidden">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center font-medium [&::-webkit-details-marker]:hidden">
+              Menu
+            </summary>
+            <div className="absolute right-0 top-full z-50 mt-2 flex min-w-48 flex-col border border-line bg-ground p-2">
+              {nav.map((item) => (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  className="flex min-h-11 items-center px-3 text-base"
+                >
+                  {item.label}
+                </a>
               ))}
-            </ul>
+            </div>
+          </details>
+        </nav>
+      </header>
+
+      <main id="main">
+        {/* ------------------------------------------------ hero: discovery */}
+        <section data-phase="discovery" className="flex flex-col overflow-x-clip pb-16 md:pb-24">
+          <div className={`${grid} pt-16 md:pt-12`}>
+            <Gutter phase="discovery">what this call is about</Gutter>
+            <div className="space-y-8 md:col-span-9">
+              <p className="text-sm font-medium text-muted">
+                Engineering case study · German municipal voice AI
+              </p>
+              <h1 className="display">A phone agent you can call right now.</h1>
+              <p className="lede">
+                It answers in real time on AWS Nova 2 Sonic. Every claim below is
+                either measured, with the command that produced it, or marked pending.
+              </p>
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-5 pt-2">
+                <a href="#demo" className="key key--solid">
+                  Call the agent <span className="arrow" aria-hidden="true">→</span>
+                </a>
+                <a href="#evidence" className="trace-link">
+                  Read the evidence
+                </a>
+              </div>
+            </div>
+          </div>
+          <div className="relative left-1/2 mt-[clamp(32px,6vh,72px)] w-screen -translate-x-1/2">
+            <SignalLine className="h-20 md:h-30" />
           </div>
         </section>
 
-        {/* ------------------------------------------------ honest limits */}
-        <section id="limits" className="space-y-6">
-          <h2 className="text-2xl font-semibold">What is not claimed</h2>
-          <ul className="max-w-2xl list-disc space-y-3 pl-5 text-dim">
-            {honestLimitations.map((item) => (
-              <li key={item.slice(0, 40)}>{item}</li>
-            ))}
-          </ul>
+        {/* ------------------------------------------------ booth: discovery */}
+        <section id="demo" data-phase="discovery" data-slot="demo" className="booth py-28">
+          <div className={grid}>
+            <Gutter phase="discovery">what to ask it</Gutter>
+            <div className="space-y-10 md:col-span-9">
+              <div className="space-y-6">
+                <h2 className="h2" data-trace>
+                  Talk to it.
+                </h2>
+                <p className="lede">
+                  Press call, allow the microphone, and ask what you would ask the
+                  engineer: what it is for, where it fits, how it handles interruptions.
+                  The agent sleeps when nobody calls, so the first ring takes about a minute.
+                </p>
+              </div>
+              <LiveDemo />
+            </div>
+          </div>
         </section>
 
-        <footer className="border-t border-line pt-8">
-          <p className="font-mono text-xs text-dim">
-            Static presentation mode — no S3, no PostgreSQL, no provider keys,
-            no live inference. Analytics collect engagement events only, no
-            PII.
-          </p>
-          <ContactLink />
-        </footer>
+        {/* ------------------------------------------------ evidence: collecting */}
+        <section id="evidence" data-phase="collecting" data-slot="evidence" className="pb-20 pt-24">
+          <div className={grid}>
+            <Gutter phase="collecting">every number has a command or a pending tag</Gutter>
+            <div className="space-y-10 md:col-span-9">
+              <h2 className="h2" data-trace>
+                Evidence, not adjectives.
+              </h2>
+              <div className="grid gap-px border border-line bg-line md:grid-cols-2">
+                {headlineMetrics.map((m) => (
+                  <div key={m.label} className="flex flex-col gap-3 bg-ground p-6">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="mono text-[12px] uppercase tracking-wide text-muted">
+                        {m.label}
+                      </span>
+                      <Tag status={m.status} />
+                    </div>
+                    <p
+                      className={`figure num text-[length:var(--t-l)] ${
+                        m.status === "pending" ? "figure--pending" : ""
+                      }`}
+                    >
+                      {m.value}
+                    </p>
+                    {m.command && (
+                      <code className="mono break-all text-sm text-muted">$ {m.command}</code>
+                    )}
+                    {m.note && <p className="text-base text-muted">{m.note}</p>}
+                  </div>
+                ))}
+              </div>
+              <BenchmarkDownload />
+            </div>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------ speech: collecting */}
+        <section id="speech" data-phase="collecting" className="pb-24">
+          <div className={grid}>
+            <Gutter phase="collecting">which speech models were compared</Gutter>
+            <div className="space-y-10 md:col-span-9">
+              <div className="space-y-6">
+                <h2 className="h2" data-trace>
+                  Speech layer
+                </h2>
+                <p className="lede">
+                  Open models, self-hosted on EU GPUs, chosen from a manifest-driven
+                  comparison. Evaluation runs on telephony-degraded audio (8 kHz,
+                  G.711 μ-law, seeded noise) with speaker-group-leakage-safe splits,
+                  because clean-studio WER is not phone-call WER.
+                </p>
+              </div>
+              <ul className="border-b border-line">
+                {speechModels.map((row) => (
+                  <li
+                    key={row.model}
+                    className="grid gap-3 border-t border-line py-6 md:grid-cols-12 md:gap-6"
+                  >
+                    <p className="mono break-all text-sm font-medium md:col-span-4">
+                      {row.model}
+                    </p>
+                    <p className="text-base text-muted md:col-span-2">
+                      {row.family}, {row.params}
+                    </p>
+                    <p className="text-base text-muted md:col-span-2">German: {row.german}</p>
+                    <p className="text-base text-muted md:col-span-2">{row.license}</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 md:col-span-2">
+                      <Tag status={row.status} />
+                      <span className="mono text-xs text-muted">{row.werTelephony}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------ limits: confirming */}
+        <section id="limits" data-phase="confirming" data-slot="limits" className="py-32">
+          <div className={grid}>
+            <Gutter phase="confirming">the claims we stop short of</Gutter>
+            <div className="md:col-span-9">
+              <h2 className="h2" data-trace>
+                What is not claimed.
+              </h2>
+              <ul className="mt-12 max-w-[42ch]">
+                {honestLimitations.map((item) => (
+                  <li
+                    key={item}
+                    data-trace
+                    className="border-t border-line py-7 text-[length:var(--t-m)] leading-snug"
+                  >
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------ architecture: executing */}
+        <section id="architecture" data-phase="executing" data-slot="architecture" className="pb-28">
+          <div className={grid}>
+            <Gutter phase="executing">how one call is wired</Gutter>
+            <div className="space-y-10 md:col-span-9">
+              <div className="space-y-6">
+                <h2 className="h2" data-trace>
+                  Architecture
+                </h2>
+                <p className="lede">
+                  One pipeline per call, strict layer boundaries, and contracts that let
+                  providers change without touching orchestration. Hover or tab through
+                  the nodes. Each one says why it exists.
+                </p>
+              </div>
+              <ArchitectureExplorer />
+            </div>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------ load: executing */}
+        <section id="load" data-phase="executing" className="py-16">
+          <div className={grid}>
+            <Gutter phase="executing">what happens at 200 calls</Gutter>
+            <div className="space-y-12 md:col-span-9">
+              <h2 className="h2 max-w-[24ch]" data-trace>
+                <span className="figure num">{loadResult.requested}</span> calls rang at once.{" "}
+                <span className="figure num">{loadResult.admitted}</span> were answered.{" "}
+                <span className="figure num">{loadResult.rejected}</span> heard a busy signal.{" "}
+                <span className="figure num">0</span> errors.
+              </h2>
+              <p className="mono text-sm text-muted">
+                orchestration only, fake providers, p50 {loadResult.p50Ms} ms / p95{" "}
+                {loadResult.p95Ms} ms
+              </p>
+              <div>
+                <p className="mono mb-5 text-sm text-muted">
+                  Debugging runbook. First check per symptom.
+                </p>
+                <dl className="grid gap-x-12 gap-y-6 md:grid-cols-2">
+                  {runbookExcerpt.map((r) => (
+                    <div key={r.symptom} className="border-t border-line pt-4">
+                      <dt className="font-semibold">{r.symptom}</dt>
+                      <dd className="mono mt-1 text-sm text-muted">{r.firstCheck}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
-    </div>
+
+      {/* ------------------------------------------------ footer: completed */}
+      <footer data-phase="completed">
+        <div className={`${grid} border-t border-line pb-44 pt-40 md:pb-48`}>
+          <Gutter phase="completed">what to do next</Gutter>
+          <div className="space-y-10 md:col-span-9">
+            <h2 className="display" data-trace>
+              Hand off to a human.
+            </h2>
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-5">
+              <ContactLink />
+              <a
+                href="https://github.com/DibbayajyotiRoy/voiceai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="trace-link"
+              >
+                github.com/DibbayajyotiRoy/voiceai
+              </a>
+            </div>
+            <p className="max-w-[60ch] text-base text-muted">
+              The page itself loads no S3, no PostgreSQL and no provider keys. Live
+              inference only runs when you start a call, on an AWS task that scales to
+              zero. Analytics count visits, never people.
+            </p>
+          </div>
+        </div>
+      </footer>
+
+      <CallHud />
+      <Reveal />
+      <LifecycleTracker />
+    </>
   );
 }

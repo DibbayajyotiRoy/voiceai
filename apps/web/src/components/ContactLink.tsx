@@ -7,9 +7,9 @@ export function ContactLink() {
     <a
       href="mailto:rdibbayajyoti@gmail.com"
       onClick={() => track("contact_link_clicked")}
-      className="mt-4 inline-block rounded bg-amber px-5 py-2.5 font-mono text-sm font-semibold text-ink"
+      className="key key--solid"
     >
-      Get in touch →
+      Email Dibbayajyoti
     </a>
   );
 }

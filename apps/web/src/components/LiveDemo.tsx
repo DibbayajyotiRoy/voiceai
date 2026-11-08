@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { gsap } from "gsap";
 import { DemoReplay } from "@/components/DemoReplay";
+import { SignalLine } from "@/components/SignalLine";
+import { signal } from "@/lib/signal";
 
 // Public base URL of the control API. Inlined at build time; unset = replay only.
 const CONTROL_URL = process.env.NEXT_PUBLIC_DEMO_CONTROL_URL?.replace(/\/+$/, "");
@@ -22,9 +25,20 @@ type Session = {
   pc?: RTCPeerConnection;
   stream?: MediaStream;
   audioCtx?: AudioContext;
+  meters: AnalyserNode[];
+  tick?: () => void;
 };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+const meterBuf = new Float32Array(512);
+/** RMS of an analyser's time-domain signal, scaled to 0..1. */
+function rms(an: AnalyserNode) {
+  an.getFloatTimeDomainData(meterBuf);
+  let sum = 0;
+  for (const v of meterBuf) sum += v * v;
+  return Math.min(1, Math.sqrt(sum / meterBuf.length) * 4);
+}
 
 async function fetchBackend(action: "start" | "status"): Promise<Backend> {
   const res = await fetch(`${CONTROL_URL}/${action}`, {
@@ -54,6 +68,9 @@ function waitForIce(pc: RTCPeerConnection, maxMs: number) {
 function teardown(s: Session) {
   s.cancelled = true;
   s.timers.forEach((t) => clearInterval(t));
+  if (s.tick) gsap.ticker.remove(s.tick);
+  signal.level = 0;
+  signal.live = false;
   s.pc?.close();
   s.stream?.getTracks().forEach((t) => t.stop());
   void s.audioCtx?.close();
@@ -62,16 +79,13 @@ function teardown(s: Session) {
 const fmt = (s: number) =>
   `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-const buttonClass =
-  "rounded bg-amber px-3 py-1 font-mono text-xs font-semibold text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber";
-const ghostButtonClass =
-  "rounded border border-line px-3 py-1 font-mono text-xs text-fg hover:border-amber focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber";
+// The call key is big on purpose. Inline: .key's own min-height would win over a utility class.
+const callKey = { minHeight: 64, padding: "0 2rem", fontSize: "1.125rem" };
 
 /** Live WebRTC voice demo backed by the scale-to-zero AWS agent, with the replay as fallback. */
 export function LiveDemo() {
   const rootRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const meterRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<Session | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
@@ -127,10 +141,18 @@ export function LiveDemo() {
     pc.ontrack = (e) => {
       const a = audioRef.current;
       if (!a) return;
-      a.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+      const remote = e.streams[0] ?? new MediaStream([e.track]);
+      a.srcObject = remote;
       void a.play().catch(() => {
         // Autoplay blocked: the user can still press play on the control.
       });
+      // Agent audio feeds the signal line through the same AudioContext as the mic.
+      if (s.audioCtx) {
+        const an = s.audioCtx.createAnalyser();
+        an.fftSize = 512;
+        s.audioCtx.createMediaStreamSource(remote).connect(an);
+        s.meters.push(an);
+      }
     };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed" && sessionRef.current === s) {
@@ -157,31 +179,37 @@ export function LiveDemo() {
     if (s.cancelled) return;
     await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
 
-    // Live: reset the session timer and start the mic level meter.
+    // Live: reset the session timer and drive the signal line from mic and agent audio.
     s.live = true;
     s.t0 = Date.now();
-    const ctx = new AudioContext();
-    s.audioCtx = ctx;
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512;
-    ctx.createMediaStreamSource(stream).connect(analyser);
-    const buf = new Uint8Array(analyser.fftSize);
-    s.timers.push(
-      window.setInterval(() => {
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (const v of buf) sum += ((v - 128) / 128) ** 2;
-        const level = Math.min(1, Math.sqrt(sum / buf.length) * 4);
-        if (meterRef.current) meterRef.current.style.transform = `scaleX(${level})`;
-      }, 100),
-    );
+    if (s.audioCtx) {
+      const mic = s.audioCtx.createAnalyser();
+      mic.fftSize = 512;
+      s.audioCtx.createMediaStreamSource(stream).connect(mic);
+      s.meters.push(mic);
+    }
+    s.tick = () => {
+      let level = 0;
+      for (const m of s.meters) level = Math.max(level, rms(m));
+      signal.level = level;
+      signal.live = true;
+    };
+    gsap.ticker.add(s.tick);
     setElapsed(0);
     setPhase("live");
   };
 
   const startCall = async () => {
     if (!CONTROL_URL || sessionRef.current) return;
-    const s: Session = { cancelled: false, live: false, t0: Date.now(), timers: [] };
+    // Created inside the click, so the browser allows audio from the start.
+    const s: Session = {
+      cancelled: false,
+      live: false,
+      t0: Date.now(),
+      timers: [],
+      meters: [],
+      audioCtx: new AudioContext(),
+    };
     sessionRef.current = s;
     setPhase("waking");
     setMessage("");
@@ -200,7 +228,9 @@ export function LiveDemo() {
       let b = await fetchBackend("start");
       while (b.state !== "ready" || !b.url) {
         if (Date.now() - s.t0 > WAKE_TIMEOUT_MS) {
-          throw new Error("The agent did not wake up in time. Try again later, or listen to the replay.");
+          throw new Error(
+            "The agent did not wake up in time. Try again later, or listen to the replay.",
+          );
         }
         await sleep(POLL_MS);
         if (s.cancelled) return;
@@ -217,76 +247,54 @@ export function LiveDemo() {
 
   const hangUp = () => finish("idle", "Call ended. Thanks for listening.");
 
-  if (!CONTROL_URL) return <DemoReplay />;
-
   const busy = phase === "waking" || phase === "connecting";
-  const statusText =
-    phase === "idle"
+  const statusText = !CONTROL_URL
+    ? "Live calls are off in this build. The scripted call below runs offline."
+    : phase === "idle"
       ? message ||
         "Talk to the agent live. It runs on AWS and scales to zero when unused to save cost, so the first start takes about a minute."
       : phase === "waking"
-        ? `Waking the agent on AWS — about a minute, it scales to zero when unused to save cost. (${elapsed}s)`
+        ? `Waking the agent on AWS. This takes about a minute, because it scales to zero when unused. (${elapsed}s)`
         : phase === "connecting"
           ? "Agent is awake. Connecting audio…"
           : phase === "live"
-            ? `Live — you are talking to the agent. ${fmt(elapsed)} of 05:00.`
+            ? `Live. You are talking to the agent. ${fmt(elapsed)} of 05:00.`
             : message;
 
   return (
-    <div ref={rootRef} className="space-y-4">
-      <div className="rounded-lg border border-line bg-panel">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <h3 className="font-mono text-xs text-fg">talk to the live demo</h3>
-          <div className="flex items-center gap-2">
-            {(phase === "idle" || phase === "error") && (
-              <button onClick={startCall} className={buttonClass}>
-                {phase === "error" ? "Try again" : "Start"}
-              </button>
-            )}
-            {busy && (
-              <button onClick={hangUp} className={ghostButtonClass}>
-                Cancel
-              </button>
-            )}
-            {phase === "live" && (
-              <button onClick={hangUp} className={buttonClass}>
-                End call
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="space-y-4 p-4">
-          <p role="status" aria-live="polite" className="font-mono text-sm text-dim">
+    <div ref={rootRef} className="space-y-10">
+      <div className="space-y-8">
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-5">
+          {CONTROL_URL && (phase === "idle" || phase === "error") && (
+            <button onClick={startCall} className="key key--solid" style={callKey}>
+              {phase === "error" ? "Try again" : "Call the agent"}
+            </button>
+          )}
+          {CONTROL_URL && busy && (
+            <button onClick={hangUp} className="key" style={callKey}>
+              Cancel
+            </button>
+          )}
+          {CONTROL_URL && phase === "live" && (
+            <button onClick={hangUp} className="key key--solid" style={callKey}>
+              End call
+            </button>
+          )}
+          <p role="status" aria-live="polite" className="mono max-w-[48ch] text-sm text-muted">
             {statusText}
           </p>
-          {phase === "live" && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-wider text-dim">
-                <span>microphone level</span>
-                <span>{fmt(elapsed)} / 05:00</span>
-              </div>
-              <div
-                aria-hidden="true"
-                className="h-2 w-full overflow-hidden rounded-sm bg-line"
-              >
-                <div
-                  ref={meterRef}
-                  className="h-full origin-left bg-pass"
-                  style={{ transform: "scaleX(0)" }}
-                />
-              </div>
-            </div>
-          )}
-          {phase === "error" && (
-            <p className="font-mono text-xs text-dim">
-              The recorded call below works offline.
-            </p>
-          )}
-          {/* Remote agent audio; autoplay is triggered from a user gesture. */}
-          <audio ref={audioRef} autoPlay />
         </div>
+        <SignalLine height={200} />
+        {phase === "error" && (
+          <p className="mono text-sm text-muted">The recorded call below works offline.</p>
+        )}
+        {/* Remote agent audio; autoplay is triggered from a user gesture. */}
+        <audio ref={audioRef} autoPlay />
       </div>
-      <DemoReplay />
+      <div className="space-y-6 border-t border-line pt-10">
+        <h3 className="text-[length:var(--t-m)] font-semibold">Or replay the scripted German call</h3>
+        <DemoReplay />
+      </div>
     </div>
   );
 }

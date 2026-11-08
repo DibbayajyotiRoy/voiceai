@@ -1,13 +1,13 @@
 # AWS DEMO deploy (cost-minimal)
 
-Public browser demo at `https://demo-api.dibbayajyoti.com`, running on one Fargate ARM64 task.
+Public browser demo at `https://demo-api.dibbayajyoti.com`, running on one Fargate x86_64 task.
 Idle, nothing runs. A control Lambda starts the task on request and stops it when idle.
 Production layout is in [full.md](full.md) and is **not** deployed by this stack.
 
 ## What gets created (`demo.yaml`, region us-east-1)
 
 - VPC with 2 public subnets, IGW, no NAT, no ALB.
-- ECS cluster `voiceai-demo`, Fargate service (`desiredCount 0`, public IP, 0.5 vCPU / 1 GB, ARM64).
+- ECS cluster `voiceai-demo`, Fargate service (`desiredCount 0`, public IP, 0.5 vCPU / 1 GB, x86_64).
 - Task: `app` (the Dockerfile image, port 8000) and `caddy` (official Caddy 2, TLS on 80/443,
   reverse-proxies to `localhost:8000`).
 - EFS (`/data` for Caddy: certs and ACME account), ECR repo `voiceai-demo` (keeps last 5 images).
@@ -34,7 +34,7 @@ deploy/aws/deploy-demo.sh
 ```
 
 The script is idempotent. It creates an artifacts bucket for the Lambda zip, packages and deploys
-the stack, then builds the arm64 image and pushes it tagged with the git sha. It prints the
+the stack, then builds the amd64 image and pushes it tagged with the git sha. It prints the
 control URL at the end.
 
 Then:
@@ -72,7 +72,7 @@ The first start takes a minute or two: ECS pulls the image, the Lambda upserts t
 
 | Item | Idle | Running |
 |---|---|---|
-| Fargate ARM64 0.5 vCPU / 1 GB | $0 | about $0.02/hr |
+| Fargate x86_64 0.5 vCPU / 1 GB | $0 | about $0.025/hr |
 | Public IPv4 on the task | $0 | about $0.005/hr |
 | Nova 2 Sonic | $0 | per-audio-minute, see Bedrock pricing |
 | EFS, ECR (about 8 GB for 5 images), logs | about $1/mo | same |

@@ -1,32 +1,63 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Archivo, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const archivo = Archivo({
+  variable: "--font-archivo",
+  subsets: ["latin"],
+  axes: ["wdth"],
+});
+
+const jetbrains = JetBrains_Mono({
+  variable: "--font-jetbrains",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const title = "voiceai: a phone agent you can call";
+const description =
+  "A German municipal phone agent you can call right now. Every claim on the page is measured with its command, or marked pending.";
 
 export const metadata: Metadata = {
-  title: "Charly-style Voice AI — Engineering Case Study",
-  description:
-    "How a German municipal voice agent is built: eval-gated speech layer, typed call state machine, Pipecat pipelines, honest benchmarks.",
+  metadataBase: new URL("https://voiceai-presentation.vercel.app"),
+  title,
+  description,
+  alternates: { canonical: "/" },
+  openGraph: {
+    title,
+    description,
+    url: "/",
+    siteName: "voiceai",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${archivo.variable} ${jetbrains.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-[#0b0e11] text-[#e6e1d8]">
+      <head>
+        {/* Motion is opt-in: no JS or reduced motion means everything is visible. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('motion')",
+          }}
+        />
+      </head>
+      <body className="min-h-full">
+        <a href="#main" className="skip">
+          Skip to content
+        </a>
         {children}
         {/* Analytics load after hydration and collect no PII (bundle-defer-third-party) */}
         <Analytics />

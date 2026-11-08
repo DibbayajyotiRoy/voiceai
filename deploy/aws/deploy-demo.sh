@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy the DEMO stack: package the control Lambda, create/update the CloudFormation stack,
-# build the arm64 app image and push it to ECR. Safe to re-run.
+# build the amd64 app image and push it to ECR. Safe to re-run.
 # Prereq: Secrets Manager secret voiceai/vercel-token exists (see deploy/aws/README.md).
 set -euo pipefail
 
@@ -49,11 +49,11 @@ output() {
 REPO_URI="$(output EcrRepositoryUri)"
 REGISTRY="${REPO_URI%%/*}"
 
-echo "==> Build linux/arm64 image and push $REPO_URI:$TAG"
+echo "==> Build linux/amd64 image and push $REPO_URI:$TAG"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
 BUILDER="voiceai-demo-builder"
 docker buildx inspect "$BUILDER" >/dev/null 2>&1 || docker buildx create --name "$BUILDER" --driver docker-container >/dev/null
-docker buildx build --builder "$BUILDER" --platform linux/arm64 \
+docker buildx build --builder "$BUILDER" --platform linux/amd64 \
   --tag "$REPO_URI:$TAG" --push "$ROOT"
 
 echo "==> Done"

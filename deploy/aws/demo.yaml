@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  voiceai DEMO stack (cost-minimal). Fargate ARM64 task (app + Caddy TLS sidecar), public
+  voiceai DEMO stack (cost-minimal). Fargate x86_64 task (app + Caddy TLS sidecar), public
   subnets, no NAT, no ALB. Control Lambda starts/stops the task and maintains the DNS A record.
   Idle cost is ~$0 (desiredCount 0, EFS/ECR/logs are pennies). See deploy/aws/README.md.
 
@@ -227,7 +227,7 @@ Resources:
       Cpu: "512"      # 0.5 vCPU
       Memory: "1024"  # 1 GB
       RuntimePlatform:
-        CpuArchitecture: ARM64
+        CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt TaskRole.Arn
@@ -261,7 +261,7 @@ Resources:
         - Name: caddy
           Image: !Ref CaddyImage
           Essential: true
-          Command: [reverse-proxy, --from, !Ref DomainName, --to, "localhost:8000"]
+          Command: [caddy, reverse-proxy, --from, !Ref DomainName, --to, "localhost:8000"]
           Environment:
             - { Name: XDG_DATA_HOME, Value: /data }
           PortMappings:

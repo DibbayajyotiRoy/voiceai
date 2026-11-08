@@ -1,5 +1,5 @@
 /**
- * Presentation data — hardcoded, sanitized, presentation-only.
+ * Presentation data. Hardcoded, sanitized, presentation-only.
  *
  * Every number here is either (a) measured on this machine by the repo's own
  * tooling and reproducible via the printed command, or (b) explicitly marked
@@ -21,7 +21,7 @@ export interface Metric {
 export const headlineMetrics: Metric[] = [
   {
     label: "Backend tests passing",
-    value: "54",
+    value: "58",
     status: "measured",
     command: "uv run pytest -q",
   },
@@ -44,7 +44,7 @@ export const headlineMetrics: Metric[] = [
     status: "measured",
     command:
       "uv run python -c \"import asyncio; from loadtest.harness import run_load; ...\"",
-    note: "50 concurrent calls, fake providers — not a 1,000-call claim",
+    note: "50 concurrent calls, fake providers. Not a 1,000-call claim.",
   },
   {
     label: "1,000 concurrent media calls",
@@ -56,7 +56,7 @@ export const headlineMetrics: Metric[] = [
     label: "Fine-tuned STT WER vs baseline",
     value: "PENDING",
     status: "pending",
-    note: "evals/speech_release.py — frozen holdout, runs on the GPU box",
+    note: "evals/speech_release.py. Frozen holdout, runs on the GPU box.",
   },
 ];
 
@@ -139,7 +139,7 @@ export const demoReplay: DemoTurn[] = [
   {
     speaker: "citizen",
     text: "Nein, falsch, die Straße heißt Müllerstraße",
-    stateNote: "targeted correction — street only, number kept",
+    stateNote: "targeted correction: street only, number kept",
   },
   {
     speaker: "citizen",
@@ -240,13 +240,6 @@ export const architecture: ArchNode[] = [
   },
 ];
 
-export const layerColors: Record<ArchNode["layer"], string> = {
-  media: "#e8a33d",
-  speech: "#7fb069",
-  brain: "#5aa9e6",
-  data: "#b388eb",
-};
-
 export interface LoadResult {
   requested: number;
   admitted: number;
@@ -271,8 +264,8 @@ export const honestLimitations: string[] = [
   "The 1,000-concurrent-call figure is an engineering target with a ready harness (loadtest/run.py), not a measured result. This laptop has one 8 GB laptop GPU; admission control was verified at 50 concurrent calls with fake providers.",
   "STT/TTS WER and MOS numbers are pending the frozen holdout eval on the GPU box (evals/speech_release.py). Every table row says PENDING rather than showing a fabricated number.",
   "Real OpenRouter/Bedrock smoke tests (evals/provider_smoke.py) need entitled credentials; the code paths are tested against recorded HTTP interactions instead.",
-  "SIP/telephony transport is a seam, not an integration — demo mode speaks WebSocket. LiveKit/SIP wiring is documented in docs/architecture.md.",
-  "Public analytics can measure that someone viewed the site, never who they are — no PII is collected by design.",
+  "SIP telephony is a seam, not an integration. The live demo uses browser WebRTC; LiveKit/SIP wiring is documented in docs/architecture.md.",
+  "Public analytics can measure that someone viewed the site, never who they are. No PII is collected by design.",
 ];
 
 export const runbookExcerpt = [
