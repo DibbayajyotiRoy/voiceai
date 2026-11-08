@@ -86,3 +86,28 @@ def source_from_file(
         title=title,
     )
     return source, data.decode("utf-8")
+
+
+def source_from_text(
+    *,
+    document_id: str,
+    tenant_id: str,
+    service: str,
+    version: str,
+    source_uri: str,
+    effective_from: datetime,
+    title: str,
+    text: str,
+) -> tuple[DocumentSource, str]:
+    """Build a source directly from in-memory text (demo/CI/tests)."""
+    source = DocumentSource(
+        document_id=document_id,
+        tenant_id=tenant_id,
+        service=service,
+        source_uri=source_uri,
+        version=version,
+        content_hash=content_hash(text.encode("utf-8")),
+        effective_from=effective_from,
+        title=title,
+    )
+    return source, text

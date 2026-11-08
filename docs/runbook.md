@@ -2,6 +2,20 @@
 
 Start with the `call_id`, then inspect its ordered event waterfall. Preserve `turn_id`, `generation`, `attempt_id`, provider/model aliases, and monotonic timestamps. Never log secrets or raw personal information.
 
+## Live inspection (running service)
+
+- `GET /health` — liveness.
+- `GET /metrics` — Prometheus: `voice_calls_started_total`, `voice_calls_rejected_total` (fast busy), `voice_turn_latency_seconds` histogram, `voice_provider_errors_total` by component/kind, sampled `voice_stt_wer`.
+- `GET /calls/{call_id}/events` — the per-call flight recorder (bounded, newest last). This is the first artifact to attach to any incident.
+- Local smoke test: `uv run python -m services.orchestrator.demo` must print `LOCAL_VOICE_DEMO_PASSED`; run the full suite with `uv run ruff check . && uv run pytest -q && uv run pyright`.
+- Load check: `uv run python -c "import asyncio; from loadtest.harness import run_load; print(asyncio.run(run_load(calls=200, turns_per_call=5, max_concurrent=50)).summary())"` — on this laptop this validates admission control and orchestration overhead only; it is not a 1,000-call production claim (see docs/evaluation.md).
+
+## Triage order
+
+1. Is the call in the flight recorder at all? If not, the failure is before session admission (SIP/WebSocket transport, auth) — check `voice_calls_rejected_total` and listener logs.
+2. Find the last successful event, then the first anomaly: provider error kind, generation bump, or missing frame.
+3. Match the anomaly to a section below; every section lists the metric/event that confirms the fix.
+
 ## Slow replies
 
 1. Compare caller speech end, endpoint decision, LLM first token, TTS first audio, and playback.
