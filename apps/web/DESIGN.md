@@ -3,7 +3,7 @@
 ## Brief
 One full-viewport dark screen. A headline, one glowing pen-red orb in the center, and a status line under it. Tap the orb to call the open voice agent (AWS Bedrock Nova 2 Sonic over WebRTC); the agent greets first. The orb is the only control and the only picture: idle it breathes slowly, waking and connecting it sends a slow ring out, live its surface moves with the real mic and agent audio. Nothing else competes with it. The status line carries every state in text, and reduced motion keeps a still sphere with the same text.
 
-Constraints: the page loads no S3, no PostgreSQL and no provider keys (disclosure line, verified). Analytics events: presentation_started, call_started, call_ended, contact_link_clicked.
+Constraints: the page loads no S3, no PostgreSQL and no provider keys (bundle scan, verified). Analytics events: presentation_started, call_started, call_ended, contact_link_clicked.
 
 ## System
 - Palette: ground `#ECEEE8` (recorder paper) · ink `#121513` · muted `#4F5550` (AA on ground) ·

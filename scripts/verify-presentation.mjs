@@ -8,8 +8,7 @@
  *     no S3 bucket references, no Postgres connection strings, no provider
  *     API key shapes (sk-or-, AKIA), no .env mentions.
  *  3. The analytics events are wired in the client chunks.
- *  4. The prerendered HTML has the call control, the demo-mode disclosure,
- *     and no forms or PII inputs.
+ *  4. The prerendered HTML has the call control and no forms or PII inputs.
  */
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -75,10 +74,9 @@ for (const event of [
   ok(bundle.includes(event), `analytics event wired: ${event}`);
 }
 
-// 4. the prerendered page: call control, disclosure, no PII surface
+// 4. the prerendered page: call control, no PII surface
 const html = readFileSync(join(outDir, "server", "app", "index.html"), "utf8");
 ok(/aria-label="[^"]*call/i.test(html), "element with aria-label containing 'call' present");
-ok(html.includes("no S3, no PostgreSQL"), "demo-mode disclosure present");
 ok(!/<form[\s>]/i.test(html), "no form elements (nothing collects PII)");
 ok(
   !/<input[^>]+(name|id)\s*=\s*["'](email|password|phone|name|address)/i.test(html),

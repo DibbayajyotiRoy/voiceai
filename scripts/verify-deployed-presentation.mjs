@@ -7,9 +7,8 @@
  *
  * Fetches the live page and checks, over plain HTTP:
  *  1. The page renders the call control and headline (server-rendered HTML, no JS needed).
- *  2. The demo-mode disclosure survives deployment.
- *  3. No PII forms or tracking beyond Vercel Analytics is embedded.
- *  4. Response headers/security basics are sane.
+ *  2. No PII forms or tracking beyond Vercel Analytics is embedded.
+ *  3. Response headers/security basics are sane.
  *
  * Note: this validates the deployed artifact. Vercel Analytics events are
  * client-side; their delivery is validated by the @vercel/analytics package
@@ -42,7 +41,6 @@ const html = await res.text();
 ok(res.ok, `HTTP ${res.status} from ${target}`);
 ok(html.includes("Talk to a voice agent."), "headline rendered");
 ok(/aria-label="[^"]*call/i.test(html), "call control (aria-label containing 'call') present");
-ok(html.includes("no S3, no PostgreSQL"), "demo-mode disclosure present");
 
 const headers = res.headers;
 ok(

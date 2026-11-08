@@ -36,11 +36,6 @@ export default function Page() {
         </div>
         <LiveDemo />
       </div>
-
-      <p className="mono mx-auto max-w-[72ch] text-center text-xs text-muted">
-        Runs on AWS Bedrock Nova 2 Sonic over WebRTC. The page loads no S3, no PostgreSQL and no
-        provider keys; calls are capped at five minutes.
-      </p>
     </main>
   );
 }
