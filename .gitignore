@@ -34,3 +34,7 @@ artifacts/
 .unlazy-hook-state.json
 .claude/settings.local.json
 .DS_Store
+
+# Live-eval raw captures (regenerate with evals/live/client.py)
+evals/live/data/*/
+!evals/live/data/*.wav

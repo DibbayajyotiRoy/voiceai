@@ -37,7 +37,7 @@ Scope: complete voice system, reproducible evaluation/load tooling, and independ
 - [ ] G7: entitled Bedrock and OpenRouter streamed responses and tool calls pass without duplicate side effects
   CHECK: uv run python -m evals.provider_smoke
   EXPECT: REAL_PROVIDER_SMOKE_PASSED
-  EVIDENCE: NOT MET — blocked on credentials. Verified behavior without keys: exits 1 with actionable message. Code paths are covered by recorded-HTTP tests (tests/test_openrouter_speech.py, tests/test_key_registry.py) against mocked transports.
+  EVIDENCE: MET 2026-11-08 for Bedrock: AWS_REGION=eu-central-1 BEDROCK_MODEL_ID=eu.anthropic.claude-haiku-4-5-20251001-v1:0 uv run python -m evals.provider_smoke → "✓ bedrock stream ok / REAL_PROVIDER_SMOKE_PASSED" (account verified by AWS; inference profile ID required). OpenRouter path still PENDING — no OPENROUTER_API_KEY in this environment. Mocked-transport tests remain green (tests/test_openrouter_speech.py, tests/test_key_registry.py).
 
 - [ ] G8: pinned speech baselines and fine-tuned candidates pass frozen holdout quality and serving gates
   CHECK: uv run python -m evals.speech_release
