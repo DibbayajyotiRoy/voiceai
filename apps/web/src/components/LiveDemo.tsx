@@ -139,10 +139,11 @@ export function LiveDemo() {
         cache: "no-store",
       }).catch(() => null);
       if (!alive()) return;
-      if (res?.ok) {
+      // 202 is also "ok" but its body is {"status":"live"}, not a report.
+      if (res?.status === 200) {
         const data: CallReportData | null = await res.json().catch(() => null);
         if (!alive()) return;
-        if (data) {
+        if (data?.call_id) {
           setReportState({ kind: "ready", data });
           return;
         }

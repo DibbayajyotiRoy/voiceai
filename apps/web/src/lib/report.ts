@@ -46,9 +46,11 @@ export const fmtMs = (ms: number | null | undefined) =>
 export const fmtSec = (ms: number | null | undefined) =>
   ms == null ? "—" : `${(ms / 1000).toFixed(2)}${NBSP}s`;
 
-export const fmtSecs = (s: number) => `${s.toFixed(1)}${NBSP}s`;
+export const fmtSecs = (s: number | null | undefined) =>
+  s == null ? "—" : `${s.toFixed(1)}${NBSP}s`;
 
-export function fmtDuration(s: number) {
+export function fmtDuration(s: number | null | undefined) {
+  if (s == null) return "—";
   const total = Math.round(s);
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
