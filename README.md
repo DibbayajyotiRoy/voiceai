@@ -11,16 +11,16 @@ Live demo-mode site: **https://voiceai-web.pages.dev** (Cloudflare Pages; was Ve
 
 ## Status
 
-Gate status: **G1–G5 met, G6–G8 blocked** (exact evidence and commands in [GATES.md](GATES.md)).
+Gate status: **G1–G5 met, G6–G9 blocked** (exact evidence and commands in [GATES.md](GATES.md)).
 
-- 54 backend tests, strict Ruff + Pyright clean, deterministic German voice demo passing (`LOCAL_VOICE_DEMO_PASSED`).
+- 91 backend tests, strict Ruff + Pyright clean, deterministic German voice demo passing (`LOCAL_VOICE_DEMO_PASSED`).
 - Admission control measured on this machine: 50 concurrent calls, 200 requested, 150 fast-busy rejections, 0 errors (orchestration-only, fake providers — not a 1,000-call claim).
 - Not claimed: 1,000 concurrent media calls (needs the production GPU fleet), live OpenRouter/Bedrock smoke (needs credentials), speech WER/MOS numbers (needs the GPU-box holdout eval). Each has a runnable entry point that fails honestly until unblocked.
 
 ## Design summary
 
 ```text
-WebRTC or SIP/RTP
+WebRTC or Twilio Media Streams (SIP/RTP also supported by the architecture)
        ↓
 Pipecat real-time runtime (per-call PipelineWorker)
        ↓
@@ -60,8 +60,8 @@ Design principles, applicable to any voice-agent product:
 ## Quick start
 
 ```bash
-uv sync                                    # install backend deps
-uv run pytest -q                           # 54 tests
+uv sync --extra demo                       # backend + WebRTC/Twilio demo deps
+uv run pytest -q                           # 91 tests
 uv run python -m services.orchestrator.demo  # full German call scenario → LOCAL_VOICE_DEMO_PASSED
 uvicorn services.api.main:app              # API + WebSocket call replay + /metrics
 

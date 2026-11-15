@@ -32,7 +32,8 @@ speech = [
   "transformers>=4.50",
 ]
 demo = [
-    "pipecat-ai[aws-nova-sonic,webrtc]>=0.0.80",
+    "pipecat-ai[aws-nova-sonic,webrtc,websocket]>=0.0.80",
+    "twilio>=9.0",
 ]
 
 [dependency-groups]

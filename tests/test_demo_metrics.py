@@ -126,6 +126,7 @@ def test_report_has_exact_schema_keys() -> None:
         "est_cost_usd",
         "model",
         "region",
+        "transport",
         "latency_basis",
         "measured_at",
     }

@@ -64,7 +64,7 @@ SYSTEM_PROMPT = """\
 You are the demo assistant for voice A I, an open, eval-gated real-time voice agent \
 systems lab. Always say the project name as "voice A I". Refer to yourself as "the demo \
 assistant", never "voice guide". You are speaking live with a recruiter or engineer \
-in a browser call.
+in a browser or phone call.
 Speak English by default. You can speak English, German, French, Italian, Spanish, \
 Portuguese and Hindi. If the caller asks you to speak one of these, or starts speaking it, \
 switch immediately and keep using it until they ask otherwise. If they ask for a language \
@@ -135,11 +135,10 @@ is broken down per stage of each turn, not just one average; and interruption ha
 cost limits are open and tested, not a black box. Be honest: it does not yet claim to beat \
 them on speed or accuracy; its edge today is ownership, transparency and how it is \
 evaluated. Give the one or two points that fit the question, not the whole list.
-This live demo: the browser connects straight to this agent, which runs Amazon Nova 2 \
-Sonic, a speech to speech model, on one small cloud server. The task scales to zero when nobody \
-calls, so the first call takes about a minute to wake it. Calls are capped at five minutes \
-and three at a time to bound cost.
-Measured: 58 backend tests pass, with strict Ruff and Pyright clean. A deterministic \
+This live demo: a browser or phone caller connects straight to this agent, which runs \
+Amazon Nova 2 Sonic, a speech to speech model, on one small cloud server. The server stays \
+online to avoid cold starts. Calls are capped at five minutes and three at a time to bound cost.
+Measured: 91 backend tests pass, with strict Ruff and Pyright clean. A deterministic \
 German voice scenario passes 11 of 11 checks. Admission control on one machine admitted 50 \
 of 200 requested calls, with 150 fast busy and zero errors. That test used fake providers, \
 so it measures orchestration only. The presentation site is deployed and its checks pass.
@@ -166,13 +165,12 @@ go quiet when interrupted. These are targets, not measurements.
 _ice_servers = [IceServer(urls="stun:stun.l.google.com:19302")]
 _handler = SmallWebRTCRequestHandler(ice_servers=_ice_servers)
 
-# Live bot sessions (one asyncio task each) and offers still negotiating.
+# Live browser/phone sessions (one asyncio task each) and connections still negotiating.
 _sessions: set[asyncio.Task[None]] = set()
-_pending_offers = 0
-# Metrics for live calls (by pc_id) and the last finished reports.
+_pending_sessions = 0
+# Metrics for live calls (by transport-specific call ID) and the last finished reports.
 _live: dict[str, CallMetrics] = {}
 _reports = ReportStore()
-# Set on connect and disconnect only; the auto-stop Lambda also checks `active`.
 last_activity = time.monotonic()
 
 router = APIRouter()
@@ -181,6 +179,29 @@ router = APIRouter()
 def _touch() -> None:
     global last_activity
     last_activity = time.monotonic()
+
+
+def _reserve_session() -> bool:
+    global _pending_sessions
+    if len(_sessions) + _pending_sessions >= MAX_CONCURRENT:
+        return False
+    _pending_sessions += 1
+    return True
+
+
+def _release_session_reservation() -> None:
+    global _pending_sessions
+    if _pending_sessions > 0:
+        _pending_sessions -= 1
+
+
+def _start_session(coro: Any, metrics: CallMetrics) -> asyncio.Task[None]:
+    _live[metrics.call_id] = metrics
+    task = asyncio.create_task(coro)
+    _sessions.add(task)
+    _touch()
+    task.add_done_callback(_sessions.discard)
+    return task
 
 
 async def _enforce_cap(runner: WorkerRunner) -> None:
@@ -265,15 +286,11 @@ class _MeteredNovaSonic(AWSNovaSonicLLMService):
         await super()._handle_usage_event(event_json)
 
 
-async def _run_session(conn: SmallWebRTCConnection, metrics: CallMetrics) -> None:
+async def _run_transport_session(transport: Any, metrics: CallMetrics) -> None:
     runner = WorkerRunner(handle_sigint=False)
     cap: asyncio.Task[None] | None = None
     try:
         creds = await _aws_credentials()
-        transport = SmallWebRTCTransport(
-            webrtc_connection=conn,
-            params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-        )
         llm = _MeteredNovaSonic(
             metrics=metrics,
             access_key_id=creds.access_key,
@@ -304,7 +321,6 @@ async def _run_session(conn: SmallWebRTCConnection, metrics: CallMetrics) -> Non
         @transport.event_handler("on_client_connected")
         async def _on_connected(_transport: Any, _client: Any) -> None:
             metrics.on_client_connected(time.monotonic())
-            # Bot greets first.
             context.add_message(
                 {"role": "developer", "content": "Start by concisely introducing yourself."}
             )
@@ -328,6 +344,14 @@ async def _run_session(conn: SmallWebRTCConnection, metrics: CallMetrics) -> Non
         _touch()
 
 
+async def _run_session(conn: SmallWebRTCConnection, metrics: CallMetrics) -> None:
+    transport = SmallWebRTCTransport(
+        webrtc_connection=conn,
+        params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    )
+    await _run_transport_session(transport, metrics)
+
+
 async def _on_connection(conn: SmallWebRTCConnection) -> None:
     # Called inside handle_web_request; must return quickly, so the session runs as a task.
     metrics = CallMetrics(
@@ -336,27 +360,22 @@ async def _on_connection(conn: SmallWebRTCConnection) -> None:
         start_ts=time.monotonic(),
         model=MODEL_ID,
         region=AWS_REGION,
+        transport="webrtc",
     )
-    _live[conn.pc_id] = metrics
-    task = asyncio.create_task(_run_session(conn, metrics))
-    _sessions.add(task)
-    _touch()
-    task.add_done_callback(_sessions.discard)
+    _start_session(_run_session(conn, metrics), metrics)
 
 
 @router.post("/api/offer")
 async def offer(request: SmallWebRTCRequest) -> dict[str, str] | None:
-    global _pending_offers
     if request.pc_id is not None:
         # Renegotiation of an existing connection; does not start a new session.
         return await _handler.handle_web_request(request, _on_connection)
-    if len(_sessions) + _pending_offers >= MAX_CONCURRENT:
+    if not _reserve_session():
         raise HTTPException(status_code=503, detail="demo is at capacity, try again shortly")
-    _pending_offers += 1
     try:
         return await _handler.handle_web_request(request, _on_connection)
     finally:
-        _pending_offers -= 1
+        _release_session_reservation()
 
 
 @router.patch("/api/offer")

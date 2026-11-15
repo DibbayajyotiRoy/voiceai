@@ -59,6 +59,7 @@ def task(last="RUNNING", started=None, **extra):
 
 
 def install(monkeypatch, ecs, ip="203.0.113.7", health=True, idle=None, dns=None):
+    monkeypatch.setenv("DEMO_ALWAYS_ON", "false")
     monkeypatch.setattr(handler, "ecs", ecs)
     monkeypatch.setattr(
         handler,
@@ -206,6 +207,15 @@ def test_sweep_noop_when_already_stopped(monkeypatch):
     ecs = FakeECS(desired=0)
     install(monkeypatch, ecs)
     assert handler.sweep()["reason"] == "stopped"
+    assert ecs.updates == []
+
+
+def test_sweep_never_stops_always_on_demo(monkeypatch):
+    old = datetime.now(UTC) - timedelta(hours=3)
+    ecs = FakeECS(desired=1, tasks=[task(started=old)])
+    install(monkeypatch, ecs, idle={"idle_seconds": 9000, "active": 0})
+    monkeypatch.setenv("DEMO_ALWAYS_ON", "true")
+    assert handler.sweep() == {"action": "none", "reason": "always-on"}
     assert ecs.updates == []
 
 

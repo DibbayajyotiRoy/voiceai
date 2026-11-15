@@ -10,6 +10,13 @@ Start with the `call_id`, then inspect its ordered event waterfall. Preserve `tu
 - Local smoke test: `uv run python -m services.orchestrator.demo` must print `LOCAL_VOICE_DEMO_PASSED`; run the full suite with `uv run ruff check . && uv run pytest -q && uv run pyright`.
 - Load check: `uv run python -c "import asyncio; from loadtest.harness import run_load; print(asyncio.run(run_load(calls=200, turns_per_call=5, max_concurrent=50)).summary())"` — on this laptop this validates admission control and orchestration overhead only; it is not a 1,000-call production claim (see docs/evaluation.md).
 
+## Telephony checks
+
+- `GET /api/demo/idle-seconds` includes browser and phone sessions in `active`.
+- Twilio incoming webhooks return 403 for bad signatures, 503 when unconfigured, and a busy TwiML response at capacity; none starts a Nova session.
+- Finished phone reports are available through the normal call-report/admin paths with `transport: twilio`. They deliberately omit phone numbers, audio, and transcripts.
+- For media failures, inspect the Twilio call/stream SIDs and the Fargate app logs. Confirm the number points to `POST /api/telephony/incoming`, the two Twilio secrets are attached to the task, and TCP 443 accepts the bidirectional stream.
+
 ## Triage order
 
 1. Is the call in the flight recorder at all? If not, the failure is before session admission (SIP/WebSocket transport, auth) — check `voice_calls_rejected_total` and listener logs.

@@ -49,11 +49,25 @@ output() {
   aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
     --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
 }
+secret_arn() {
+  aws secretsmanager describe-secret --region "$REGION" --secret-id "$1" \
+    --query ARN --output text 2>/dev/null || true
+}
+TWILIO_ACCOUNT_SID_SECRET_ARN="${TWILIO_ACCOUNT_SID_SECRET_ARN:-$(secret_arn voiceai/twilio-account-sid)}"
+TWILIO_AUTH_TOKEN_SECRET_ARN="${TWILIO_AUTH_TOKEN_SECRET_ARN:-$(secret_arn voiceai/twilio-auth-token)}"
+if [ -n "$TWILIO_ACCOUNT_SID_SECRET_ARN" ] && [ -n "$TWILIO_AUTH_TOKEN_SECRET_ARN" ]; then
+  echo "==> Twilio secrets found; phone calling enabled"
+else
+  echo "==> Twilio secrets not found; phone calling disabled"
+fi
 deploy_stack() {
   echo "==> Deploy stack $STACK (image tag $TAG)"
   aws cloudformation deploy --region "$REGION" --stack-name "$STACK" \
     --template-file "$BUILD_DIR/packaged.yaml" --capabilities CAPABILITY_IAM \
-    --parameter-overrides "ImageTag=$TAG" "VercelTeamId=${VERCEL_TEAM_ID:-}" --no-fail-on-empty-changeset
+    --parameter-overrides "ImageTag=$TAG" "VercelTeamId=${VERCEL_TEAM_ID:-}" \
+    "TwilioAccountSidSecretArn=$TWILIO_ACCOUNT_SID_SECRET_ARN" \
+    "TwilioAuthTokenSecretArn=$TWILIO_AUTH_TOKEN_SECRET_ARN" \
+    --no-fail-on-empty-changeset
 }
 push_image() {
   REPO_URI="$(output EcrRepositoryUri)"

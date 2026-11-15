@@ -1,6 +1,6 @@
-"""Control plane for the demo Fargate task (Lambda + Function URL + 5-min sweep).
+"""Control plane for the always-on demo Fargate task (Lambda + Function URL).
 
-POST /start        -> ECS desiredCount 0 -> 1
+POST /start        -> idempotently ensure ECS desiredCount is 1
 GET  /status       -> stopped | starting | ready (+ url once https /health answers,
                        stage = stopped|provisioning|pulling|starting|securing|ready, since_s)
 GET  /admin/summary -> superadmin view: backend state, call history, totals, AWS cost, traffic.
@@ -8,9 +8,9 @@ GET  /admin/summary -> superadmin view: backend state, call history, totals, AWS
 GET  /report/{share_id} -> public view of one finished call (no auth, cached 1 h).
 POST /track        -> page and call events from the site. Requires `X-Track-Secret`
                        (`voiceai/track-secret`), so only the Vercel frontend can write.
-EventBridge  -> stop the task when idle (active == 0 and idle > 15 min) or after 60 min.
+EventBridge  -> legacy idle-stop schedule, disabled for the always-on demo.
 
-DNS: on each new task public IP, upsert the A record via the Vercel REST API.
+DNS: on each new task public IP, upsert the A record via the Cloudflare API.
 """
 
 import base64
@@ -33,10 +33,9 @@ from boto3.dynamodb.conditions import Key
 CLUSTER = os.environ.get("CLUSTER", "voiceai-demo")
 SERVICE = os.environ.get("SERVICE", "voiceai-demo")
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "demo-api.dibbayajyoti.com")
-DNS_ZONE = os.environ.get("DNS_ZONE", "dibbayajyoti.com")
-DNS_RECORD = os.environ.get("DNS_RECORD", "demo-api")
-VERCEL_SECRET_ID = os.environ.get("VERCEL_SECRET_ID", "voiceai/vercel-token")
-VERCEL_TEAM_ID = os.environ.get("VERCEL_TEAM_ID", "")
+PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "demo-api.dibbayajyoti.com")
+CLOUDFLARE_ZONE_ID = os.environ.get("CLOUDFLARE_ZONE_ID", "ad07956dca4d534c939f5285fdab2dcd")
+CF_DNS_TOKEN_SECRET = os.environ.get("CF_DNS_TOKEN_SECRET", "voiceai/cloudflare-dns-token")
 ADMIN_TOKEN_SECRET = os.environ.get("ADMIN_TOKEN_SECRET", "voiceai/admin-token")
 TRACK_SECRET_NAME = os.environ.get("TRACK_SECRET_NAME", "voiceai/track-secret")
 DEMO_CALLS_TABLE = os.environ.get("DEMO_CALLS_TABLE", "voiceai-demo-calls")
@@ -129,40 +128,54 @@ def _running_task() -> dict[str, Any] | None:
     }
 
 
-def _vercel(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _cloudflare(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     global _token
     if _token is None:
-        _token = sm.get_secret_value(SecretId=VERCEL_SECRET_ID)["SecretString"].strip()
-    sep = "&" if "?" in path else "?"
-    url = f"https://api.vercel.com{path}"
-    if VERCEL_TEAM_ID:
-        url += f"{sep}teamId={VERCEL_TEAM_ID}"
+        _token = sm.get_secret_value(SecretId=CF_DNS_TOKEN_SECRET)["SecretString"].strip()
     req = urllib.request.Request(
-        url,
+        f"https://api.cloudflare.com/client/v4{path}",
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={"Authorization": f"Bearer {_token}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
         raw = resp.read()
-    return json.loads(raw) if raw else {}
+    out = json.loads(raw) if raw else {}
+    if not out.get("success", True):
+        raise RuntimeError(f"cloudflare api error: {out.get('errors')}")
+    return out
+
+
+def _safe_ensure_dns(ip: str) -> None:
+    """Best-effort DNS update. A DNS failure must never break wake/status for the caller."""
+    global _last_dns_ip
+    try:
+        _ensure_dns(ip)
+    except Exception as exc:  # noqa: BLE001 - deliberate: DNS is auxiliary to the control API
+        print(f"dns update failed (non-fatal): {exc!r}")
+        _last_dns_ip = None  # retry on the next call
 
 
 def _ensure_dns(ip: str) -> None:
-    """Upsert A record demo-api -> ip (TTL 60). Runs only when the IP changes."""
+    """Upsert A record demo-api -> ip (TTL 60, unproxied). Runs only when the IP changes."""
     global _last_dns_ip
     if ip == _last_dns_ip:
         return
-    records = _vercel("GET", f"/v5/domains/{DNS_ZONE}/records?limit=100").get("records", [])
-    existing = [r for r in records if r.get("name") == DNS_RECORD and r.get("type") == "A"]
-    if existing:
-        if existing[0].get("value") != ip:
-            _vercel("PATCH", f"/v1/domains/records/{existing[0]['id']}", {"value": ip, "ttl": 60})
+    records = _cloudflare(
+        "GET", f"/zones/{CLOUDFLARE_ZONE_ID}/dns_records?type=A&name={PUBLIC_HOST}"
+    ).get("result", [])
+    if records:
+        if records[0].get("content") != ip:
+            _cloudflare(
+                "PATCH",
+                f"/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{records[0]['id']}",
+                {"content": ip, "ttl": 60},
+            )
     else:
-        _vercel(
+        _cloudflare(
             "POST",
-            f"/v2/domains/{DNS_ZONE}/records",
-            {"type": "A", "name": DNS_RECORD, "value": ip, "ttl": 60},
+            f"/zones/{CLOUDFLARE_ZONE_ID}/dns_records",
+            {"type": "A", "name": PUBLIC_HOST, "content": ip, "ttl": 60, "proxied": False},
         )
     _last_dns_ip = ip
 
@@ -213,7 +226,7 @@ def status() -> dict[str, Any]:
     task = _running_task()
     since_s = None if task is None else (datetime.now(UTC) - task["createdAt"]).total_seconds()
     if task is not None and task["ip"] is not None:
-        _ensure_dns(task["ip"])
+        _safe_ensure_dns(task["ip"])
     stage = _stage(task)
     if stage == "securing" and _healthy():
         return {
@@ -226,7 +239,9 @@ def status() -> dict[str, Any]:
 
 
 def sweep(now: float | None = None) -> dict[str, Any]:
-    """Scheduled: stop an idle or over-long task. Never stops a task with an active call."""
+    """Compatibility entry point for the disabled legacy idle-stop schedule."""
+    if os.environ.get("DEMO_ALWAYS_ON", "true").lower() == "true":
+        return {"action": "none", "reason": "always-on"}
     now = time.time() if now is None else now
     if _desired() == 0:
         return {"action": "none", "reason": "stopped"}

@@ -45,7 +45,8 @@ the speakers in your eval set never appeared in training data.
 
 | Metric | Value | Command |
 |---|---|---|
-| Backend correctness | 54 tests passing | `uv run pytest -q` |
+| Backend correctness | 91 tests passing | `uv run pytest -q` |
+| Dialed-call voice-to-voice latency | **PENDING** — needs Twilio credentials and two voice numbers | `uv run python evals/live/telephony.py --help` |
 | Local voice scenario | 11/11 checks (correction, retrieval, tool, barge-in, failure) | `uv run python -m services.orchestrator.demo` |
 | Admission control | 200 req / 50 admitted / 150 fast-busy / 0 errors; p50 turn 0.13 ms (orchestration only) | `loadtest.harness.run_load` |
 | STT WER on telephony holdout | **PENDING** — frozen holdout eval runs on the GPU box | `uv run python -m evals.speech_release` |

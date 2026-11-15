@@ -30,7 +30,7 @@ def test_idle_seconds_counts_active_sessions(client: TestClient, monkeypatch) ->
 
 def test_offer_rejected_with_503_at_capacity_without_aws(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(bot, "_sessions", {object() for _ in range(bot.MAX_CONCURRENT)})
-    monkeypatch.setattr(bot, "_pending_offers", 0)
+    monkeypatch.setattr(bot, "_pending_sessions", 0)
 
     async def must_not_be_called(*_args, **_kwargs):
         raise AssertionError("handler reached at capacity")
@@ -41,9 +41,9 @@ def test_offer_rejected_with_503_at_capacity_without_aws(client: TestClient, mon
     assert response.status_code == 503
 
 
-def test_pending_offers_count_toward_capacity(client: TestClient, monkeypatch) -> None:
+def test_pending_sessions_count_toward_capacity(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(bot, "_sessions", set())
-    monkeypatch.setattr(bot, "_pending_offers", bot.MAX_CONCURRENT)
+    monkeypatch.setattr(bot, "_pending_sessions", bot.MAX_CONCURRENT)
 
     async def must_not_be_called(*_args, **_kwargs):
         raise AssertionError("handler reached at capacity")

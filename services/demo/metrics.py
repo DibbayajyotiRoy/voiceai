@@ -67,13 +67,20 @@ class CallMetrics:
     """Collects timing from pipeline frames for one call. Timestamps are monotonic seconds."""
 
     def __init__(
-        self, call_id: str, started_at: str, start_ts: float, model: str, region: str
+        self,
+        call_id: str,
+        started_at: str,
+        start_ts: float,
+        model: str,
+        region: str,
+        transport: str = "webrtc",
     ) -> None:
         self.call_id = call_id
         self.started_at = started_at
         self.start_ts = start_ts
         self.model = model
         self.region = region
+        self.transport = transport
         self.connected_ts: float | None = None
         self.turns = 0
         self.interruptions = 0
@@ -146,6 +153,7 @@ class CallMetrics:
             "est_cost_usd": estimate_cost_usd(tokens),
             "model": self.model,
             "region": self.region,
+            "transport": self.transport,
             "latency_basis": "model_end_of_turn",
             "measured_at": "server",
         }

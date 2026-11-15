@@ -6,8 +6,8 @@ The WebSocket protocol is JSON lines:
   server -> client: {"type": "assistant_turn", "text": "...", "state": {...}}
                   | {"type": "event", ...} | {"type": "pong"}
 
-A production telephony transport (SIP/WebRTC via Pipecat) replaces this demo
-transport; the orchestration behind it is identical.
+Live browser WebRTC and Twilio telephony transports are mounted when the `demo`
+extra is installed; the deterministic WebSocket replay remains available for tests.
 """
 
 from __future__ import annotations
@@ -66,12 +66,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-try:  # Browser demo needs the `demo` extra; core install works without it.
+try:  # Live demos need the `demo` extra; core install works without it.
     from services.demo.bot import router as demo_router
+    from services.demo.telephony import router as telephony_router
 except ImportError:
     demo_router = None
+    telephony_router = None
 if demo_router is not None:
     app.include_router(demo_router)
+if telephony_router is not None:
+    app.include_router(telephony_router)
 
 # Per-call event waterfall, newest first; bounded. This is the " Flight
 # recorder" the runbook points at: when a citizen complains, dump the call.

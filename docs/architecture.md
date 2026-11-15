@@ -6,7 +6,7 @@ The system answers German municipal questions and completes typed tools while ha
 
 ## Runtime path
 
-1. WebRTC carries browser audio; SIP/RTP carries telephone audio. WebSocket supports the first deterministic local replay.
+1. WebRTC carries browser audio. The public demo also accepts Twilio phone calls over signed webhooks and bidirectional Media Stream WebSockets; SIP/RTP remains a production transport option. WebSocket supports the first deterministic local replay.
 2. Pipecat owns media frames, voice activity, turns, interruption propagation, context aggregation, and paced playback.
 3. Internal STT/TTS services use binary protobuf over gRPC. Audio is decoded to PCM without Base64.
 4. A single-writer `CallState` stores the workflow phase, typed slots, pending actions, and generation IDs.
@@ -61,7 +61,8 @@ The next question comes from missing slots. Confirmed values are not requested a
 ## Transport boundaries
 
 - Browser: WebRTC/Opus; local replay may use WebSocket/PCM.
-- Telephone: SIP signalling and RTP/PCMA or PCMU.
+- Public telephone demo: Twilio signed HTTPS webhook, then bidirectional secure WebSocket with 8 kHz PCMU converted by `TwilioFrameSerializer`. Browser and phone calls share the same Nova pipeline and admission limit.
+- Production telephone option: SIP signalling and RTP/PCMA or PCMU.
 - Internal speech: streaming gRPC with binary PCM.
 - Bedrock: AWS SDK event streams over HTTPS.
 - OpenRouter: SSE over HTTPS.

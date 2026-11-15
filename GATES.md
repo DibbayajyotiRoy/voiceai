@@ -7,7 +7,7 @@ Scope: complete voice system, reproducible evaluation/load tooling, and independ
 - [x] G1: backend contracts, state, retrieval, providers, and orchestration tests pass
   CHECK: uv run pytest -q && python3 -c "print('BACKEND_VERIFICATION_PASSED')"
   EXPECT: BACKEND_VERIFICATION_PASSED
-  EVIDENCE: met 2026-11-08 — 54 passed (tests/: media contracts, state machine, context, knowledge, providers, voice pipeline, evals, API/demo)
+  EVIDENCE: met 2026-11-15 — 91 passed (tests/: media contracts, state machine, context, knowledge, providers, voice pipeline, WebRTC/Twilio transport, browser/dialed-call eval helpers, API/demo)
 
 - [x] G2: backend lint and static typing pass
   CHECK: uv run ruff check . && uv run pyright && python3 -c "print('BACKEND_QUALITY_PASSED')"
@@ -43,3 +43,8 @@ Scope: complete voice system, reproducible evaluation/load tooling, and independ
   CHECK: uv run python -m evals.speech_release
   EXPECT: SPEECH_RELEASE_PASSED
   EVIDENCE: NOT MET — blocked on GPU box + [speech] extras + frozen holdout manifest. Entry point validates environment and data contract and exits 1 honestly otherwise. Model selection table and training plans exist (training/prepare.py, MODEL_RECIPES); all WER rows on the site are marked PENDING.
+
+- [ ] G9: signed Twilio phone calls pass a handset smoke test and the same 25 turns used for WebRTC produce valid dialed-call audio and timing artifacts
+  CHECK: uv run python evals/live/telephony_report.py evals/live/data/telephony-latency/client_latency.json evals/live/data/telephony-quality/client_latency.json --out evals/live/data/telephony-combined.json
+  EXPECT: status completed with 25 requested turns and 25 valid turns; report measurement_scope twilio_dialed_e2e
+  EVIDENCE: NOT MET — blocked on Twilio credentials and two voice-capable numbers. Signed webhook/admission tests and deterministic codec/timing/aggregation tests pass; no phone latency is claimed yet.

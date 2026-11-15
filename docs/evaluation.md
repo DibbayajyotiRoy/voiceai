@@ -42,13 +42,34 @@ The target is 1,000 simultaneously active calls, not 1,000 calls per day.
 - Successful completed test calls: ≥ 99%.
 - Stale audio after cancellation: 0.
 
+## Live dialed-call latency
+
+`evals/live/telephony.py` calls the agent number from a second Twilio number, streams the same prerecorded questions used by the WebRTC eval, and measures the last caller chunk sent to Twilio against the first returned non-silent agent media. Prompts are sequential, greeting audio is excluded, and missing/timed-out turns fail the run. The measurement scope is `twilio_dialed_e2e`: it includes the complete agent telephony path but not a physical handset's last-mile carrier leg.
+
+Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `TELEPHONY_EVAL_FROM_NUMBER`, and `TELEPHONY_EVAL_PUBLIC_WS_URL`. The last value is a `wss://` tunnel to the local WebSocket on port 8765 and must not contain query parameters. Then run:
+
+```bash
+uv run python evals/live/telephony.py \
+  --questions q01 q02 q03 q04 q05 q06 q07 q08 q09 q10 \
+  --out evals/live/data/telephony-latency
+uv run python evals/live/telephony.py \
+  --questions q01 q02 q03 q04 q05 q06 q07 q08 q09 q10 q11 q12 q13 q14 q15 \
+  --out evals/live/data/telephony-quality
+uv run python evals/live/telephony_report.py \
+  evals/live/data/telephony-latency/client_latency.json \
+  evals/live/data/telephony-quality/client_latency.json \
+  --out evals/live/data/telephony-combined.json
+```
+
+The combined report must show `status: completed`, 25 requested turns, and 25 valid turns before claiming a 25/25 result. Each run saves raw per-turn timings, returned 8 kHz audio, and frame energy. Telephony results are **PENDING** until Twilio credentials and two voice numbers are available; no phone median is currently claimed.
+
 ## Current result ledger
 
-Measured on this machine (2026-11-08), reproducible via the printed commands:
+Measured on this machine (2026-11-15), reproducible via the printed commands:
 
 | Result | Value | Label | Command |
 |---|---|---|---|
-| Backend tests | 54 passed, 0 failed | measured | `uv run pytest -q` |
+| Backend tests | 91 passed, 0 failed | measured | `uv run pytest -q` |
 | Lint / strict typing | 0 ruff errors, 0 pyright errors | measured | `uv run ruff check . && uv run pyright` |
 | Local voice scenario | 11/11 checks PASS | measured | `uv run python -m services.orchestrator.demo` |
 | Admission control | 200 requested / 50 admitted / 150 fast-busy / 0 errors; p50 turn 0.13 ms (orchestration only, fake providers) | measured | `loadtest.harness.run_load` |

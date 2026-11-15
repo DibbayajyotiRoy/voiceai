@@ -1,10 +1,18 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  voiceai DEMO stack (cost-minimal). Fargate x86_64 task (app + Caddy TLS sidecar), public
-  subnets, no NAT, no ALB. Control Lambda starts/stops the task and maintains the DNS A record.
-  Idle cost is ~$0 (desiredCount 0, EFS/ECR/logs are pennies). See deploy/aws/README.md.
+  voiceai demo stack (always-on). Fargate x86_64 task (app + Caddy TLS sidecar), public
+  subnets, no NAT, no ALB. One task stays online to avoid cold starts. The control Lambda
+  maintains the DNS A record and serves status/reports. See deploy/aws/README.md.
 
 Parameters:
+  TwilioAccountSidSecretArn:
+    Type: String
+    Default: ""
+    Description: Optional Secrets Manager ARN containing the Twilio Account SID.
+  TwilioAuthTokenSecretArn:
+    Type: String
+    Default: ""
+    Description: Optional Secrets Manager ARN containing the Twilio Auth Token.
   DomainName:
     Type: String
     Default: demo-api.dibbayajyoti.com
@@ -19,7 +27,12 @@ Parameters:
   VercelTeamId:
     Type: String
     Default: ""
-    Description: Vercel team id if dibbayajyoti.com lives under a team. Empty for personal account.
+    Description: DEPRECATED, unused. DNS is managed via the Cloudflare API (CLOUDFLARE_ZONE_ID / CF_DNS_TOKEN_SECRET on the control Lambda).
+
+Conditions:
+  TwilioConfigured: !And
+    - !Not [!Equals [!Ref TwilioAccountSidSecretArn, ""]]
+    - !Not [!Equals [!Ref TwilioAuthTokenSecretArn, ""]]
 
 Resources:
   # ---------- Network: 2 public subnets, IGW, no NAT ----------
@@ -218,6 +231,18 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies: !If
+        - TwilioConfigured
+        - - PolicyName: twilio-secret-read
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref TwilioAccountSidSecretArn
+                    - !Ref TwilioAuthTokenSecretArn
+        - !Ref AWS::NoValue
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -275,8 +300,8 @@ Resources:
                 Resource: "*"
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                # Secret name is voiceai/vercel-token (created by hand; see README). Suffix is random.
-                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:voiceai/vercel-token-*
+                # Secret name is voiceai/cloudflare-dns-token (created by hand; see README). Suffix is random.
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:voiceai/cloudflare-dns-token-*
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:voiceai/admin-token-*
@@ -335,6 +360,13 @@ Resources:
             - { Name: DEMO_MAX_SESSION_SECONDS, Value: "300" }
             - { Name: DEMO_ALLOWED_ORIGINS, Value: "https://dibbayajyoti.com,https://voiceai-presentation.vercel.app,http://localhost:3000" }
             - { Name: DEMO_CALLS_TABLE, Value: !Ref CallsTable }
+            - Name: DEMO_PUBLIC_BASE_URL
+              Value: !Sub "https://${DomainName}"
+          Secrets: !If
+            - TwilioConfigured
+            - - { Name: TWILIO_ACCOUNT_SID, ValueFrom: !Ref TwilioAccountSidSecretArn }
+              - { Name: TWILIO_AUTH_TOKEN, ValueFrom: !Ref TwilioAuthTokenSecretArn }
+            - !Ref AWS::NoValue
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -371,10 +403,8 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       PlatformVersion: LATEST
-      # No DesiredCount on purpose: the control Lambda owns it (1 on /start, 0 when idle).
-      # Pinning it here made every stack update stop the task mid-call. First create starts
-      # one task; the idle sweep stops it after 15 minutes.
-      # One-task demo: stop the old task before starting the new one (no double cost).
+      DesiredCount: 1
+      # One task stays online to avoid cold starts. Deployments still wait for no active calls.
       DeploymentConfiguration:
         MinimumHealthyPercent: 0
         MaximumPercent: 100
@@ -401,14 +431,13 @@ Resources:
           CLUSTER: voiceai-demo
           SERVICE: voiceai-demo
           PUBLIC_HOST: !Ref DomainName
-          DNS_ZONE: dibbayajyoti.com
-          DNS_RECORD: demo-api
-          VERCEL_SECRET_ID: voiceai/vercel-token
-          VERCEL_TEAM_ID: !Ref VercelTeamId
+          CLOUDFLARE_ZONE_ID: ad07956dca4d534c939f5285fdab2dcd
+          CF_DNS_TOKEN_SECRET: voiceai/cloudflare-dns-token
           ADMIN_TOKEN_SECRET: voiceai/admin-token
           TRACK_SECRET_NAME: voiceai/track-secret
           DEMO_CALLS_TABLE: !Ref CallsTable
           DEMO_EVENTS_TABLE: !Ref EventsTable
+          DEMO_ALWAYS_ON: "true"
 
   ControlUrl:
     Type: AWS::Lambda::Url
@@ -440,9 +469,9 @@ Resources:
   IdleSweepRule:
     Type: AWS::Events::Rule
     Properties:
-      Description: Stop the demo task when idle or over 60 minutes
+      Description: Disabled legacy idle-stop schedule; the demo remains online
       ScheduleExpression: rate(5 minutes)
-      State: ENABLED
+      State: DISABLED
       Targets:
         - { Id: idle-sweep, Arn: !GetAtt ControlFunction.Arn }
 

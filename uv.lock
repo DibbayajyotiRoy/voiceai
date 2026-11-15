@@ -70,6 +70,18 @@ wheels = [
 ]
 
 [[package]]
+name = "aiohttp-retry"
+version = "2.9.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/61/ebda4d8e3d8cfa1fd3db0fb428db2dd7461d5742cea35178277ad180b033/aiohttp_retry-2.9.1.tar.gz", hash = "sha256:8eb75e904ed4ee5c2ec242fefe85bf04240f685391c4879d8f541d6028ff01f1", size = 13608, upload-time = "2024-11-06T10:44:54.574Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/99/84ba7273339d0f3dfa57901b846489d2e5c2cd731470167757f1935fffbd/aiohttp_retry-2.9.1-py3-none-any.whl", hash = "sha256:66d2759d1921838256a05a3f80ad7e724936f083e35be5abb5e16eed6be6dc54", size = 9981, upload-time = "2024-11-06T10:44:52.917Z" },
+]
+
+[[package]]
 name = "aioice"
 version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1422,7 +1434,8 @@ dependencies = [
 
 [package.optional-dependencies]
 demo = [
-    { name = "pipecat-ai", extra = ["aws-nova-sonic", "webrtc"] },
+    { name = "pipecat-ai", extra = ["aws-nova-sonic", "webrtc", "websocket"] },
+    { name = "twilio" },
 ]
 speech = [
     { name = "librosa" },
@@ -1453,7 +1466,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = ">=1.30" },
     { name = "pgvector", specifier = ">=0.3.6" },
     { name = "pipecat-ai", specifier = ">=0.0.80" },
-    { name = "pipecat-ai", extras = ["aws-nova-sonic", "webrtc"], marker = "extra == 'demo'", specifier = ">=0.0.80" },
+    { name = "pipecat-ai", extras = ["aws-nova-sonic", "webrtc", "websocket"], marker = "extra == 'demo'", specifier = ">=0.0.80" },
     { name = "prometheus-client", specifier = ">=0.21" },
     { name = "protobuf", specifier = ">=5.28" },
     { name = "pydantic", specifier = ">=2.10" },
@@ -1462,6 +1475,7 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.13" },
     { name = "torch", marker = "extra == 'speech'", specifier = ">=2.6" },
     { name = "transformers", marker = "extra == 'speech'", specifier = ">=4.50" },
+    { name = "twilio", marker = "extra == 'demo'", specifier = ">=9.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 provides-extras = ["speech", "demo"]
@@ -2022,6 +2036,9 @@ aws-nova-sonic = [
 webrtc = [
     { name = "aiortc" },
     { name = "opencv-python-headless" },
+]
+websocket = [
+    { name = "fastapi" },
 ]
 
 [[package]]
@@ -3062,6 +3079,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ee/9f/c5201d42a484c061e528825fc8e2d565f5abd50a4ced6fb7d29c4ec99b2b/truststore-0.10.5.tar.gz", hash = "sha256:30d36967ccaded5cbb38d602c433f53600036c79d502f4533a49b60a03bbefcd", size = 28091, upload-time = "2026-10-12T22:27:31.808Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/truststore-0.10.5-py3-none-any.whl", hash = "sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c", size = 19017, upload-time = "2026-10-12T22:27:30.377Z" },
+]
+
+[[package]]
+name = "twilio"
+version = "9.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "aiohttp-retry" },
+    { name = "pyjwt" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/56/6f/f892d801a16b1de21e03ec3786ded94599499193429dccae5e7f95489192/twilio-9.13.0.tar.gz", hash = "sha256:3d110011db53354b7fe8480b469db0d4fcf082fafb73b50820c7d7d6e1c9dac1", size = 1817289, upload-time = "2026-11-06T09:35:59.568Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/50/069e982c83c8a864a97cb0a247562233b230686d8c201572d1054c541be5/twilio-9.13.0-py2.py3-none-any.whl", hash = "sha256:a73eb7139f47ed0ad934e9cf0a26cd0add6b86e6ca4aec5964624a9ea588c11c", size = 2527728, upload-time = "2026-11-06T09:35:57.824Z" },
 ]
 
 [[package]]
