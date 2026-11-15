@@ -40,11 +40,28 @@ Properties are limited to safe section or scenario identifiers. No names, email 
 
 ## Deployment
 
-Live demo-mode deployment: https://voiceai-presentation.vercel.app
+Live demo-mode deployment: https://voiceai-web.pages.dev (Cloudflare Pages, static export + Pages Function for /api/track; the Vercel deployment is retired)
 
 - `npm --prefix apps/web run build && node scripts/verify-presentation.mjs` → G4 (passed 2026-11-08)
-- `node scripts/verify-deployed-presentation.mjs https://voiceai-presentation.vercel.app` → G5 (passed 2026-11-08)
+- `node scripts/verify-deployed-presentation.mjs https://voiceai-web.pages.dev` → G5 (passed 2026-11-08)
 
 A tagged application URL can help distinguish an outreach campaign where supported. Anonymous visits, referrers, devices, locations, and engagement do **not** prove that Charly or a particular reviewer visited. Do not attempt covert identification.
 
 Add another analytics provider only if a specific question remains unanswered. Configure any cookie-based tooling with appropriate notice/consent and EU privacy settings.
+
+## Cloudflare Pages hosting (2026-11-15)
+
+The Vercel deployment was paused by Vercel (bandwidth), so the site moved to Cloudflare Pages:
+
+- `next build` with `output: "export"` produces `apps/web/out/` (9 static routes).
+  Build requires `NEXT_PUBLIC_DEMO_CONTROL_URL` and `NEXT_PUBLIC_SITE_URL` env vars.
+- The one dynamic route, `/api/track`, is now a Cloudflare Pages Function
+  (`apps/web/functions/api/track.ts`). It validates events, hashes the daily IP with the
+  shared secret via Web Crypto, and forwards to the control Lambda. Geo note: the Lambda
+  requires lat/lon (Vercel-only headers), so events from Cloudflare carry no geo; the admin
+  world map gets no new pins until the Lambda accepts country-only geo.
+- Shared report URLs `/r/<id>` are served by a `_redirects` rewrite
+  (`/r/* /r/call 200`) to one static client-rendered shell.
+- Secrets (`TRACK_SECRET`, `NEXT_PUBLIC_DEMO_CONTROL_URL`) are Pages project secrets;
+  the control Lambda's Function-URL CORS allows `https://voiceai-web.pages.dev`.
+- Deploy: `npx wrangler pages deploy out --project-name=voiceai-web --branch=main`.

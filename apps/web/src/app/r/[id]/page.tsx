@@ -1,38 +1,65 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { useParams } from "next/navigation";
 import { CallReport } from "@/components/CallReport";
-import { fmtDuration, fmtSec } from "@/lib/report";
+import type { CallReportData } from "@/lib/report";
+import { fmtDuration } from "@/lib/report";
 import { getSharedReport } from "@/lib/report-share";
 import { ReportOpened } from "./ReportOpened";
 
-type Props = { params: Promise<{ id: string }> };
+// A shared report is looked up by id in the browser (the endpoint is public), so this
+// page stays fully static and can be hosted on any static CDN.
 
-// A shared report is looked up by id at request time (cached an hour), so it is not an instant navigation.
-export const instant = false;
+export default function SharedReportPage() {
+  const { id } = useParams<{ id: string }>();
+  const [report, setReport] = useState<CallReportData | null>(null);
+  const [state, setState] = useState<"loading" | "missing" | "ready">("loading");
 
-const medianOf = (p50: number | null | undefined) => (p50 == null ? null : fmtSec(p50));
+  useEffect(() => {
+    let live = true;
+    getSharedReport(id)
+      .then((r) => {
+        if (!live) return;
+        if (r) {
+          setReport(r);
+          setState("ready");
+        } else {
+          setState("missing");
+        }
+      })
+      .catch(() => live && setState("missing"));
+    return () => {
+      live = false;
+    };
+  }, [id]);
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { id } = await params;
-  const report = await getSharedReport(id);
-  const median = medianOf(report?.latency_ms?.p50);
-  const title = median ? `${median} median reply on a live voice AI call` : "Call report";
-  const description = "A live call with the voiceai agent: reply times for every turn, measured on the server.";
-  return {
-    title,
-    description,
-    robots: { index: false, follow: false },
-    alternates: { canonical: `/r/${id}` },
-    openGraph: { title, description, url: `/r/${id}` },
-    twitter: { card: "summary_large_image", title, description },
-  };
-}
+  if (state === "loading") {
+    return (
+      <main id="main" className="wrap flex min-h-svh items-center py-4">
+        <p className="phase">Loading the call report…</p>
+      </main>
+    );
+  }
 
-export default async function SharedReportPage({ params }: Props) {
-  const { id } = await params;
-  const report = await getSharedReport(id);
-  if (!report) notFound();
+  if (state === "missing" || !report) {
+    return (
+      <main id="main" className="wrap flex min-h-svh flex-col gap-6 py-4">
+        <header>
+          <Link href="/" className="text-lg font-semibold tracking-tight">
+            voiceai
+          </Link>
+        </header>
+        <p className="phase">This call report does not exist (or has expired).</p>
+        <div>
+          <Link href="/" className="key key--solid">
+            Back to the demo <span className="arrow" aria-hidden="true">→</span>
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main id="main" className="wrap flex min-h-svh flex-col gap-10 py-4">

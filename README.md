@@ -7,7 +7,7 @@ The repository contains two independent deliverables:
 - **Full voice system:** Pipecat, FastAPI, pydantic-ai, open STT/TTS, OpenRouter, AWS Bedrock, PostgreSQL/pgvector, S3-compatible storage, evals, and load tooling.
 - **Hosted presentation:** a static Vercel site with bundled demo content, an interactive call replay, benchmark evidence, and privacy-conscious analytics.
 
-Live demo-mode site: **https://voiceai-presentation.vercel.app**
+Live demo-mode site: **https://voiceai-web.pages.dev** (Cloudflare Pages; was Vercel)
 
 ## Status
 

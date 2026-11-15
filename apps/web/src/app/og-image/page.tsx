@@ -81,7 +81,7 @@ export default function OgImage() {
         </div>
 
         <div style={{ fontFamily: MONO, fontSize: 20, lineHeight: 1.6 }}>
-          <p style={{ margin: 0 }}>voiceai-presentation.vercel.app</p>
+          <p style={{ margin: 0 }}>voiceai-web.pages.dev</p>
           <p style={{ margin: 0, color: "#A3AAA4" }}>by Dibbayajyoti Roy</p>
         </div>
       </section>

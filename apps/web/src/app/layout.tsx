@@ -27,7 +27,7 @@ const ogImage = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://voiceai-presentation.vercel.app"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://voiceai-web.pages.dev"),
   title,
   description,
   alternates: { canonical: "/" },
